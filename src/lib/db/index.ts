@@ -259,6 +259,10 @@ export function listAllHits(): HitRow[] {
   return db().prepare(`SELECT * FROM hit_records ORDER BY draw_code DESC`).all() as HitRow[];
 }
 
+export function listHitsByBet(betId: number): HitRow[] {
+  return db().prepare(`SELECT * FROM hit_records WHERE bet_id = ? ORDER BY draw_code DESC`).all(betId) as HitRow[];
+}
+
 /* ====== meta ====== */
 
 export function setMeta(key: string, value: string): void {

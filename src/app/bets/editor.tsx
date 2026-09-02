@@ -2,6 +2,18 @@
 import { useEffect, useMemo, useState } from "react";
 
 type Type = "single" | "complex" | "danTuo";
+
+interface BetStat {
+  bet_id: number;
+  periods: number;
+  wins_count: number;
+  cost: number;
+  win_amount: number;
+  profit: number;
+  best_win: number;
+  tier_counts: { 1: number; 2: number; 3: number; 4: number; 5: number; 6: number };
+}
+
 interface Bet {
   id?: number;
   name: string;
@@ -75,8 +87,27 @@ function fmtYuan(cents: number) {
   return (cents / 100).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 }
 
+const TIER_STYLES: Record<1 | 2 | 3 | 4 | 5 | 6, { on: string; label: string }> = {
+  1: { on: "bg-rose-500/20 text-rose-300 border-rose-500/40", label: "一等" },
+  2: { on: "bg-orange-500/20 text-orange-300 border-orange-500/40", label: "二等" },
+  3: { on: "bg-amber-500/20 text-amber-300 border-amber-500/40", label: "三等" },
+  4: { on: "bg-yellow-500/20 text-yellow-300 border-yellow-500/40", label: "四等" },
+  5: { on: "bg-sky-500/20 text-sky-300 border-sky-500/40", label: "五等" },
+  6: { on: "bg-teal-500/20 text-teal-300 border-teal-500/40", label: "六等" },
+};
+
+function TierBadge({ tier, count }: { tier: 1 | 2 | 3 | 4 | 5 | 6; count: number }) {
+  if (!count) return <span className="px-1.5 py-0.5 rounded border border-ink-300 text-ink-200 text-[10px]">{TIER_STYLES[tier].label} 0</span>;
+  return (
+    <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold ${TIER_STYLES[tier].on}`}>
+      {TIER_STYLES[tier].label} ×{count}
+    </span>
+  );
+}
+
 export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
   const [list, setList] = useState<Bet[]>(initial);
+  const [stats, setStats] = useState<Record<number, BetStat>>({});
   const [draft, setDraft] = useState<Bet>({
     name: "",
     type: "complex",
@@ -92,10 +123,19 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
   const [editStart, setEditStart] = useState<string>("");
   const [editUnit, setEditUnit] = useState<string>("");
 
-  // 当 defaultStartCode 异步到达时回填
+  // 拉取所有守号的中奖统计
+  const refreshStats = async () => {
+    try {
+      const r = await fetch("/api/bets/stats");
+      const j = await r.json();
+      const map: Record<number, BetStat> = {};
+      for (const s of j.stats) map[s.bet_id] = s;
+      setStats(map);
+    } catch {}
+  };
   useEffect(() => {
-    if (defaultStartCode && !draft.start_code) setDraft((d) => ({ ...d, start_code: defaultStartCode }));
-  }, [defaultStartCode]);
+    refreshStats();
+  }, [list.length]);
 
   const changeType = (t: Type) => {
     setDraft({ ...draft, type: t, payload: emptyByType(t) });
@@ -146,6 +186,7 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
       body: JSON.stringify({ id: b.id, [key]: v }),
     });
     setList(list.map((x) => (x.id === b.id ? { ...x, [key]: v } : x)));
+    refreshStats();
   };
 
   const startEdit = (b: Bet) => {
@@ -168,6 +209,7 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
     if (!r.ok) { alert(j.error ?? "保存失败"); return; }
     setList(list.map((x) => (x.id === editingId ? { ...x, ...(patch.start_code !== undefined ? { start_code: patch.start_code } : {}), ...(patch.unit_price !== undefined ? { unit_price: patch.unit_price } : {}) } : x)));
     setEditingId(null);
+    refreshStats();
   };
 
   const summarize = (b: Bet) => {
@@ -302,50 +344,71 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
               </tr>
             </thead>
             <tbody>
-              {list.map((b) => (
-                <tr key={b.id}>
-                  <td className="font-medium">{b.name}</td>
-                  <td>{b.type === "single" ? "单式" : b.type === "complex" ? "复式" : "胆拖"}</td>
-                  <td className="font-mono text-xs">{summarize(b)}</td>
-                  <td className="font-mono text-xs">
-                    {editingId === b.id ? (
-                      <input className="input py-1 px-2 w-24" value={editStart} onChange={(e) => setEditStart(e.target.value)} placeholder="留空=全部" />
-                    ) : (
-                      <span>{b.start_code ?? "全部"}</span>
-                    )}
-                  </td>
-                  <td className="font-mono text-xs">
-                    {editingId === b.id ? (
-                      <input className="input py-1 px-2 w-16" type="number" step="0.1" value={editUnit} onChange={(e) => setEditUnit(e.target.value)} />
-                    ) : (
-                      `${(b.unit_price / 100).toFixed(2)} 元`
-                    )}
-                  </td>
-                  <td>
-                    <button className={`btn ${b.buy_enabled ? "btn-success" : "btn-ghost"}`} onClick={() => toggle(b, "buy_enabled")}>
-                      {b.buy_enabled ? "是" : "否"}
-                    </button>
-                  </td>
-                  <td>
-                    <button className={`btn ${b.active ? "btn-success" : "btn-ghost"}`} onClick={() => toggle(b, "active")}>
-                      {b.active ? "启用" : "停用"}
-                    </button>
-                  </td>
-                  <td className="flex gap-2">
-                    {editingId === b.id ? (
-                      <>
-                        <button className="btn" onClick={saveEdit}>保存</button>
-                        <button className="btn btn-ghost" onClick={() => setEditingId(null)}>取消</button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="btn btn-ghost" onClick={() => startEdit(b)}>编辑</button>
-                        <button className="btn btn-danger" onClick={() => remove(b.id)}>删除</button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {list.map((b) => {
+                const s = b.id ? stats[b.id] : undefined;
+                return (
+                  <tr key={b.id}>
+                    <td className="font-medium">
+                      <div>{b.name}</div>
+                      {s && s.periods > 0 && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <TierBadge tier={1} count={s.tier_counts[1]} />
+                          <TierBadge tier={2} count={s.tier_counts[2]} />
+                          <TierBadge tier={3} count={s.tier_counts[3]} />
+                          <TierBadge tier={4} count={s.tier_counts[4]} />
+                          <TierBadge tier={5} count={s.tier_counts[5]} />
+                          <TierBadge tier={6} count={s.tier_counts[6]} />
+                          <span className="text-ink-200">
+                            · 期 {s.periods} / 中过 {s.wins_count} / 盈亏
+                            <span className={s.profit >= 0 ? "text-emerald-400 ml-1" : "text-rose-400 ml-1"}>
+                              {fmtYuan(s.profit)}
+                            </span>
+                          </span>
+                        </div>
+                      )}
+                    </td>
+                    <td>{b.type === "single" ? "单式" : b.type === "complex" ? "复式" : "胆拖"}</td>
+                    <td className="font-mono text-xs">{summarize(b)}</td>
+                    <td className="font-mono text-xs">
+                      {editingId === b.id ? (
+                        <input className="input py-1 px-2 w-24" value={editStart} onChange={(e) => setEditStart(e.target.value)} placeholder="留空=全部" />
+                      ) : (
+                        <span>{b.start_code ?? "全部"}</span>
+                      )}
+                    </td>
+                    <td className="font-mono text-xs">
+                      {editingId === b.id ? (
+                        <input className="input py-1 px-2 w-16" type="number" step="0.1" value={editUnit} onChange={(e) => setEditUnit(e.target.value)} />
+                      ) : (
+                        `${(b.unit_price / 100).toFixed(2)} 元`
+                      )}
+                    </td>
+                    <td>
+                      <button className={`btn ${b.buy_enabled ? "btn-success" : "btn-ghost"}`} onClick={() => toggle(b, "buy_enabled")}>
+                        {b.buy_enabled ? "是" : "否"}
+                      </button>
+                    </td>
+                    <td>
+                      <button className={`btn ${b.active ? "btn-success" : "btn-ghost"}`} onClick={() => toggle(b, "active")}>
+                        {b.active ? "启用" : "停用"}
+                      </button>
+                    </td>
+                    <td className="flex gap-2">
+                      {editingId === b.id ? (
+                        <>
+                          <button className="btn" onClick={saveEdit}>保存</button>
+                          <button className="btn btn-ghost" onClick={() => setEditingId(null)}>取消</button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="btn btn-ghost" onClick={() => startEdit(b)}>编辑</button>
+                          <button className="btn btn-danger" onClick={() => remove(b.id)}>删除</button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
