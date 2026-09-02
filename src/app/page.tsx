@@ -1,14 +1,17 @@
 import { Balls } from "@/components/Balls";
 import { SyncButton } from "@/components/SyncButton";
-import { getDraw, getMeta, listBets, listHitsByDraw, latestDraw } from "@/lib/db";
+import { getMeta, listBets, listHitsByDraw, latestDraw } from "@/lib/db";
+import { unstable_noStore as noStore } from "next/cache";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function fmtYuan(cents: number) {
   return (cents / 100).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 }
 
 export default async function HomePage() {
+  noStore();
   const latest = latestDraw();
   const bets = listBets(true);
   const lastSync = getMeta("last_sync_at");

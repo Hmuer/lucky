@@ -1,5 +1,6 @@
 import { Balls } from "@/components/Balls";
 import { listAllHits, listBets, listDraws } from "@/lib/db";
+import { unstable_noStore as noStore } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,7 @@ function fmtYuan(cents: number) {
 }
 
 export default async function HistoryPage() {
+  noStore();
   const draws = listDraws(100);
   const bets = listBets(false);
   const hits = listAllHits();

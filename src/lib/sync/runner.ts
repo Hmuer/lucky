@@ -3,7 +3,7 @@
  */
 
 import { fetchLatestDraws, parseDrawRow } from "../crawler/cwl";
-import { getDraw, listBets, setMeta, upsertDraw, upsertHitRecord } from "../db";
+import { db, getDraw, listBets, listDraws, setMeta, upsertDraw, upsertHitRecord } from "../db";
 import type { DrawRow } from "../db";
 import { settle } from "../engine/settle";
 import type { PrizeTier } from "../engine/types";
@@ -54,6 +54,8 @@ export async function syncLatest(): Promise<SyncReport> {
 
       for (const b of bets) {
         if (!b.buy_enabled) continue;
+        // start_code 过滤：只在开始期及之后才结算
+        if (b.start_code && parsed.code < b.start_code) continue;
         const bet = rowToBet(b);
         const result = settle(bet, draw, { prizeAmounts });
         const cost = result.units * b.unit_price;
@@ -97,6 +99,7 @@ export async function syncOne(code: string): Promise<SyncReport> {
     const bets = listBets(true);
     for (const b of bets) {
       if (!b.buy_enabled) continue;
+      if (b.start_code && parsed.code < b.start_code) continue;
       const bet = rowToBet(b);
       const result = settle(bet, draw, { prizeAmounts });
       upsertHitRecord({
@@ -125,4 +128,51 @@ export function ensureLatestSeed(): void {
       console.error("[ensureLatestSeed] failed:", e);
     }
   })();
+}
+
+/**
+ * 对单个守号按当前 start_code 重新结算所有已入库的开奖
+ * 用于：新增守号（默认 start_code = 当前最新期，追溯从该期开始）、
+ *       用户修改了 start_code 想追溯历史
+ */
+export function resyncBet(betId: number): { recalc: number; deleted: number } {
+  const bet = db().prepare(`SELECT * FROM bets WHERE id = ?`).get(betId) as any;
+  if (!bet) throw new Error(`bet ${betId} not found`);
+  // 先清掉该守号的全部历史记录，再按 start_code 重算
+  const del = db().prepare(`DELETE FROM hit_records WHERE bet_id = ?`).run(betId);
+  const draws = listDraws(10000);
+  let recalc = 0;
+  const startCode = bet.start_code ?? "0000000";
+  for (const drawRow of draws) {
+    if (drawRow.code < startCode) continue;
+    if (!bet.buy_enabled) continue;
+    const draw = {
+      red: drawRow.red.split(",").map((x) => parseInt(x, 10)),
+      blue: parseInt(drawRow.blue, 10),
+    };
+    const prizeAmounts = prizeAmountsFrom(drawRow);
+    const engineBet = rowToBet(bet);
+    const result = settle(engineBet, draw, { prizeAmounts });
+    upsertHitRecord({
+      draw_code: drawRow.code,
+      bet_id: betId,
+      units: result.units,
+      cost: result.units * bet.unit_price,
+      win_amount: result.totalAmount * 100,
+      breakdown: JSON.stringify(result.tierBreakdown),
+    });
+    recalc++;
+  }
+  return { recalc, deleted: del.changes };
+}
+
+/** 计算下一个预期期号 = 最新期号 + 1（按年递增 + 期内顺序） */
+export function nextDrawCode(): string | null {
+  const latest = db().prepare(`SELECT code FROM draws ORDER BY date DESC, code DESC LIMIT 1`).get() as { code: string } | undefined;
+  if (!latest) return null;
+  const year = parseInt(latest.code.slice(0, 4), 10);
+  const seq = parseInt(latest.code.slice(4), 10);
+  // 年内最大期号双色球约 156
+  if (seq >= 156) return `${year + 1}001`;
+  return `${year}${String(seq + 1).padStart(3, "0")}`;
 }

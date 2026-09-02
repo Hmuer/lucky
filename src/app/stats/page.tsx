@@ -1,5 +1,6 @@
 import { StatsCharts } from "./charts";
 import { listAllHits, listDraws } from "@/lib/db";
+import { unstable_noStore as noStore } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,7 @@ function fmtYuan(cents: number) {
 }
 
 export default async function StatsPage() {
+  noStore();
   const hits = listAllHits();
   const draws = listDraws(500);
   const drawMap = new Map(draws.map((d) => [d.code, d]));

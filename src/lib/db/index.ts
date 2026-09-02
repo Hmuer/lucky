@@ -54,9 +54,10 @@ function initSchema(d: Database.Database) {
       name TEXT NOT NULL,
       type TEXT NOT NULL,           -- single/complex/danTuo
       payload TEXT NOT NULL,        -- JSON: { red/redDan/redTuo/blue }
-      unit_price INTEGER NOT NULL DEFAULT 2,  -- 单注金额（分）
-      buy_enabled INTEGER NOT NULL DEFAULT 1, -- 该期是否购买
+      unit_price INTEGER NOT NULL DEFAULT 200, -- 单注金额（分），默认 2 元
+      buy_enabled INTEGER NOT NULL DEFAULT 1,  -- 该期是否购买
       active INTEGER NOT NULL DEFAULT 1,
+      start_code TEXT,              -- 从哪期开始守（NULL = 全部；字符串 = 该期及之后才结算）
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -81,6 +82,13 @@ function initSchema(d: Database.Database) {
       updated_at INTEGER NOT NULL
     );
   `);
+
+  // 兼容老库：bets 表缺 start_code 列则补上
+  // 注意：必须在 CREATE TABLE 之后做，否则新库上 bets 还不存在会抛错
+  const cols = d.prepare(`PRAGMA table_info(bets)`).all() as { name: string }[];
+  if (cols.length > 0 && !cols.some((c) => c.name === "start_code")) {
+    d.exec(`ALTER TABLE bets ADD COLUMN start_code TEXT`);
+  }
 }
 
 /* ====== draws ====== */
@@ -158,6 +166,7 @@ export interface BetRow {
   unit_price: number;
   buy_enabled: number;
   active: number;
+  start_code: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -177,11 +186,12 @@ export function createBet(input: {
   payload: unknown;
   unit_price?: number;
   buy_enabled?: number;
+  start_code?: string | null;
 }): number {
   const now = Date.now();
   const stmt = db().prepare(
-    `INSERT INTO bets (name, type, payload, unit_price, buy_enabled, active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?, ?)`
+    `INSERT INTO bets (name, type, payload, unit_price, buy_enabled, active, start_code, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`
   );
   const r = stmt.run(
     input.name,
@@ -189,13 +199,14 @@ export function createBet(input: {
     JSON.stringify(input.payload),
     input.unit_price ?? 200, // 默认 2 元 = 200 分
     input.buy_enabled ?? 1,
+    input.start_code ?? null,
     now,
     now
   );
   return Number(r.lastInsertRowid);
 }
 
-export function updateBet(id: number, patch: Partial<{ name: string; payload: unknown; unit_price: number; buy_enabled: number; active: number }>): void {
+export function updateBet(id: number, patch: Partial<{ name: string; payload: unknown; unit_price: number; buy_enabled: number; active: number; start_code: string | null }>): void {
   const cur = getBet(id);
   if (!cur) throw new Error(`bet ${id} not found`);
   const next = {
@@ -204,10 +215,12 @@ export function updateBet(id: number, patch: Partial<{ name: string; payload: un
     unit_price: patch.unit_price ?? cur.unit_price,
     buy_enabled: patch.buy_enabled ?? cur.buy_enabled,
     active: patch.active ?? cur.active,
+    start_code: patch.start_code !== undefined ? patch.start_code : cur.start_code,
     updated_at: Date.now(),
   };
-  db().prepare(`UPDATE bets SET name=@name, payload=@payload, unit_price=@unit_price, buy_enabled=@buy_enabled, active=@active, updated_at=@updated_at WHERE id=@id`)
-    .run({ ...next, id });
+  db().prepare(
+    `UPDATE bets SET name=@name, payload=@payload, unit_price=@unit_price, buy_enabled=@buy_enabled, active=@active, start_code=@start_code, updated_at=@updated_at WHERE id=@id`
+  ).run({ ...next, id });
 }
 
 export function deleteBet(id: number): void {

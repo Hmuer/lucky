@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Type = "single" | "complex" | "danTuo";
 interface Bet {
@@ -10,6 +10,12 @@ interface Bet {
   unit_price: number;
   buy_enabled: number;
   active: number;
+  start_code: string | null;
+}
+
+interface EditorProps {
+  initial: Bet[];
+  defaultStartCode: string | null;
 }
 
 function emptyByType(t: Type) {
@@ -50,7 +56,26 @@ function BallPicker({ value, range, onChange, color }: { value: number[]; range:
   );
 }
 
-export function BetsEditor({ initial }: { initial: Bet[] }) {
+function comb(n: number, k: number) {
+  if (k < 0 || k > n) return 0;
+  if (k === 0 || k === n) return 1;
+  k = Math.min(k, n - k);
+  let r = 1;
+  for (let i = 0; i < k; i++) r = (r * (n - i)) / (i + 1);
+  return Math.round(r);
+}
+
+function countUnits(type: Type, p: any): number {
+  if (type === "single") return p.red.length === 6 && p.blue.length === 1 ? 1 : 0;
+  if (type === "complex") return comb(p.red.length, 6) * Math.max(p.blue.length, 1);
+  return comb(p.redTuo.length, 6 - p.redDan.length) * Math.max(p.blue.length, 1);
+}
+
+function fmtYuan(cents: number) {
+  return (cents / 100).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
+}
+
+export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
   const [list, setList] = useState<Bet[]>(initial);
   const [draft, setDraft] = useState<Bet>({
     name: "",
@@ -59,13 +84,25 @@ export function BetsEditor({ initial }: { initial: Bet[] }) {
     unit_price: 200,
     buy_enabled: 1,
     active: 1,
+    start_code: defaultStartCode,
   });
   const [err, setErr] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editStart, setEditStart] = useState<string>("");
+  const [editUnit, setEditUnit] = useState<string>("");
+
+  // 当 defaultStartCode 异步到达时回填
+  useEffect(() => {
+    if (defaultStartCode && !draft.start_code) setDraft((d) => ({ ...d, start_code: defaultStartCode }));
+  }, [defaultStartCode]);
 
   const changeType = (t: Type) => {
     setDraft({ ...draft, type: t, payload: emptyByType(t) });
   };
+
+  const draftUnits = useMemo(() => countUnits(draft.type, draft.payload), [draft]);
+  const draftTotal = draftUnits * draft.unit_price;
 
   const submit = async () => {
     setErr("");
@@ -80,6 +117,7 @@ export function BetsEditor({ initial }: { initial: Bet[] }) {
           payload: draft.payload,
           unit_price: draft.unit_price,
           buy_enabled: draft.buy_enabled,
+          start_code: draft.start_code,
         }),
       });
       const j = await r.json();
@@ -110,6 +148,28 @@ export function BetsEditor({ initial }: { initial: Bet[] }) {
     setList(list.map((x) => (x.id === b.id ? { ...x, [key]: v } : x)));
   };
 
+  const startEdit = (b: Bet) => {
+    setEditingId(b.id ?? null);
+    setEditStart(b.start_code ?? "");
+    setEditUnit(String(b.unit_price / 100));
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    const patch: any = { id: editingId };
+    if (editStart !== "") patch.start_code = editStart.trim() || null;
+    if (editUnit) patch.unit_price = Math.round(parseFloat(editUnit) * 100);
+    const r = await fetch("/api/bets", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const j = await r.json();
+    if (!r.ok) { alert(j.error ?? "保存失败"); return; }
+    setList(list.map((x) => (x.id === editingId ? { ...x, ...(patch.start_code !== undefined ? { start_code: patch.start_code } : {}), ...(patch.unit_price !== undefined ? { unit_price: patch.unit_price } : {}) } : x)));
+    setEditingId(null);
+  };
+
   const summarize = (b: Bet) => {
     const p = b.payload;
     if (b.type === "single") return `${p.red.length}红 + ${p.blue.length}蓝`;
@@ -134,30 +194,58 @@ export function BetsEditor({ initial }: { initial: Bet[] }) {
           ))}
         </div>
 
-        <div className="grid md:grid-cols-2 gap-4">
+        <div className="grid md:grid-cols-3 gap-4">
           <div>
             <label className="text-xs text-ink-500">名称</label>
             <input className="input mt-1" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：生日组合" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-ink-500">单注金额（元）</label>
+          <div>
+            <label className="text-xs text-ink-500">单注金额（元）</label>
+            <div className="flex items-center gap-2 mt-1">
               <input
-                className="input mt-1"
+                className="input"
                 type="number"
                 min={1}
                 step={1}
                 value={draft.unit_price / 100}
                 onChange={(e) => setDraft({ ...draft, unit_price: Math.round(parseFloat(e.target.value || "0") * 100) || 200 })}
               />
-            </div>
-            <div className="flex items-end gap-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={!!draft.buy_enabled} onChange={(e) => setDraft({ ...draft, buy_enabled: e.target.checked ? 1 : 0 })} />
-                每期购买
-              </label>
+              {draftUnits > 0 && (
+                <span className="text-sm text-ink-700 whitespace-nowrap">
+                  × {draftUnits} 注 = <span className="font-mono font-semibold">{fmtYuan(draftTotal)}</span>
+                </span>
+              )}
             </div>
           </div>
+          <div>
+            <label className="text-xs text-ink-500">从哪期开始守</label>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                className="input"
+                placeholder={`默认 ${defaultStartCode ?? "下一期"}`}
+                value={draft.start_code ?? ""}
+                onChange={(e) => setDraft({ ...draft, start_code: e.target.value.trim() || null })}
+              />
+              <button type="button" className="btn btn-ghost text-xs px-2 py-1" onClick={() => setDraft({ ...draft, start_code: defaultStartCode })}>
+                下一期
+              </button>
+              <button type="button" className="btn btn-ghost text-xs px-2 py-1" onClick={() => setDraft({ ...draft, start_code: null })}>
+                全历史
+              </button>
+            </div>
+            <div className="text-xs text-ink-500 mt-1">
+              {draft.start_code
+                ? `从 ${draft.start_code} 期及之后才会结算`
+                : "从所有历史期开始结算（含已开奖）"}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center gap-3 text-sm">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={!!draft.buy_enabled} onChange={(e) => setDraft({ ...draft, buy_enabled: e.target.checked ? 1 : 0 })} />
+            每期购买
+          </label>
         </div>
 
         <div className="mt-4 space-y-3">
@@ -185,8 +273,9 @@ export function BetsEditor({ initial }: { initial: Bet[] }) {
         </div>
 
         {err && <div className="mt-3 text-sm text-red-700">{err}</div>}
-        <div className="mt-4">
+        <div className="mt-4 flex items-center gap-3">
           <button className="btn" disabled={busy} onClick={submit}>保存守号</button>
+          {draftUnits > 0 && <span className="text-sm text-ink-500">本期合计：<span className="font-mono font-semibold text-ink-900">{fmtYuan(draftTotal)}</span></span>}
         </div>
       </div>
 
@@ -201,7 +290,8 @@ export function BetsEditor({ initial }: { initial: Bet[] }) {
                 <th>名称</th>
                 <th>类型</th>
                 <th>号码</th>
-                <th>说明</th>
+                <th>开始期</th>
+                <th>单注</th>
                 <th>购买</th>
                 <th>启用</th>
                 <th></th>
@@ -213,7 +303,20 @@ export function BetsEditor({ initial }: { initial: Bet[] }) {
                   <td className="font-medium">{b.name}</td>
                   <td>{b.type === "single" ? "单式" : b.type === "complex" ? "复式" : "胆拖"}</td>
                   <td className="font-mono text-xs">{summarize(b)}</td>
-                  <td className="text-ink-500 text-xs">{JSON.stringify(b.payload)}</td>
+                  <td className="font-mono text-xs">
+                    {editingId === b.id ? (
+                      <input className="input py-1 px-2 w-24" value={editStart} onChange={(e) => setEditStart(e.target.value)} placeholder="留空=全部" />
+                    ) : (
+                      <span>{b.start_code ?? "全部"}</span>
+                    )}
+                  </td>
+                  <td className="font-mono text-xs">
+                    {editingId === b.id ? (
+                      <input className="input py-1 px-2 w-16" type="number" step="0.1" value={editUnit} onChange={(e) => setEditUnit(e.target.value)} />
+                    ) : (
+                      `${(b.unit_price / 100).toFixed(2)} 元`
+                    )}
+                  </td>
                   <td>
                     <button className={`btn ${b.buy_enabled ? "btn-success" : "btn-ghost"}`} onClick={() => toggle(b, "buy_enabled")}>
                       {b.buy_enabled ? "是" : "否"}
@@ -224,8 +327,18 @@ export function BetsEditor({ initial }: { initial: Bet[] }) {
                       {b.active ? "启用" : "停用"}
                     </button>
                   </td>
-                  <td>
-                    <button className="btn btn-danger" onClick={() => remove(b.id)}>删除</button>
+                  <td className="flex gap-2">
+                    {editingId === b.id ? (
+                      <>
+                        <button className="btn" onClick={saveEdit}>保存</button>
+                        <button className="btn btn-ghost" onClick={() => setEditingId(null)}>取消</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="btn btn-ghost" onClick={() => startEdit(b)}>编辑</button>
+                        <button className="btn btn-danger" onClick={() => remove(b.id)}>删除</button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -235,18 +348,4 @@ export function BetsEditor({ initial }: { initial: Bet[] }) {
       </div>
     </>
   );
-}
-
-function countUnits(type: Type, p: any): number {
-  function comb(n: number, k: number) {
-    if (k < 0 || k > n) return 0;
-    if (k === 0 || k === n) return 1;
-    k = Math.min(k, n - k);
-    let r = 1;
-    for (let i = 0; i < k; i++) r = (r * (n - i)) / (i + 1);
-    return Math.round(r);
-  }
-  if (type === "single") return 1;
-  if (type === "complex") return comb(p.red.length, 6) * Math.max(p.blue.length, 1);
-  return comb(p.redTuo.length, 6 - p.redDan.length) * Math.max(p.blue.length, 1);
 }
