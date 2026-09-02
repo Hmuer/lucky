@@ -10,8 +10,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body>
-        <header className="border-b border-ink-100 bg-white">
+      <body className="bg-ink-900 text-ink-50">
+        <header className="border-b border-ink-300 bg-ink-700">
           <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="inline-flex w-6 h-6 rounded-full ball-red text-[10px] items-center justify-center font-bold">红</span>
@@ -19,15 +19,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span className="ml-2 font-semibold tracking-wide">双色球守号监控</span>
             </div>
             <nav className="flex gap-1 text-sm">
-              <Link className="px-3 py-1.5 rounded-md hover:bg-ink-100" href="/">首页</Link>
-              <Link className="px-3 py-1.5 rounded-md hover:bg-ink-100" href="/bets">守号管理</Link>
-              <Link className="px-3 py-1.5 rounded-md hover:bg-ink-100" href="/history">历史记录</Link>
-              <Link className="px-3 py-1.5 rounded-md hover:bg-ink-100" href="/stats">统计</Link>
+              <Link className="px-3 py-1.5 rounded-md hover:bg-ink-500 text-ink-50" href="/">首页</Link>
+              <Link className="px-3 py-1.5 rounded-md hover:bg-ink-500 text-ink-50" href="/bets">守号管理</Link>
+              <Link className="px-3 py-1.5 rounded-md hover:bg-ink-500 text-ink-50" href="/history">历史记录</Link>
+              <Link className="px-3 py-1.5 rounded-md hover:bg-ink-500 text-ink-50" href="/stats">统计</Link>
             </nav>
           </div>
         </header>
         <main className="max-w-6xl mx-auto px-4 py-6">{children}</main>
-        <footer className="max-w-6xl mx-auto px-4 py-8 text-xs text-ink-500">
+        <footer className="max-w-6xl mx-auto px-4 py-8 text-xs text-ink-100">
           数据源：中国福利彩票（中彩网 cwl.gov.cn）。本工具仅供个人记账核对，非投注平台。
         </footer>
       </body>

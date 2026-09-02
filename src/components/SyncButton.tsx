@@ -30,7 +30,7 @@ export function SyncButton({ onResult }: { onResult?: (msg: string) => void }) {
         const code = prompt("输入要补录的期号，如 2024024");
         if (code) sync(code.trim());
       }}>补录指定期</button>
-      {msg && <span className="text-sm text-ink-500">{msg}</span>}
+      {msg && <span className="text-sm text-ink-100">{msg}</span>}
     </div>
   );
 }

@@ -45,7 +45,7 @@ function BallPicker({ value, range, onChange, color }: { value: number[]; range:
                 ? color === "red"
                   ? "ball-red"
                   : "ball-blue"
-                : "bg-white border border-ink-200 text-ink-700 hover:bg-ink-50"
+                : "ball-pick-off hover:bg-ink-500"
             }`}
           >
             {String(n).padStart(2, "0")}
@@ -187,7 +187,11 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
               key={t}
               type="button"
               onClick={() => changeType(t)}
-              className={`px-3 py-1.5 rounded-md border ${draft.type === t ? "bg-ink-900 text-white border-ink-900" : "bg-white border-ink-200"}`}
+              className={`px-3 py-1.5 rounded-md border transition ${
+                draft.type === t
+                  ? "bg-ink-50 text-ink-900 border-ink-50"
+                  : "bg-transparent text-ink-100 border-ink-300 hover:bg-ink-500"
+              }`}
             >
               {t === "single" ? "单式" : t === "complex" ? "复式" : "胆拖"}
             </button>
@@ -196,11 +200,11 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
 
         <div className="grid md:grid-cols-3 gap-4">
           <div>
-            <label className="text-xs text-ink-500">名称</label>
+            <label className="text-xs text-ink-100">名称</label>
             <input className="input mt-1" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：生日组合" />
           </div>
           <div>
-            <label className="text-xs text-ink-500">单注金额（元）</label>
+            <label className="text-xs text-ink-100">单注金额（元）</label>
             <div className="flex items-center gap-2 mt-1">
               <input
                 className="input"
@@ -211,14 +215,14 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                 onChange={(e) => setDraft({ ...draft, unit_price: Math.round(parseFloat(e.target.value || "0") * 100) || 200 })}
               />
               {draftUnits > 0 && (
-                <span className="text-sm text-ink-700 whitespace-nowrap">
+                <span className="text-sm text-ink-100 whitespace-nowrap">
                   × {draftUnits} 注 = <span className="font-mono font-semibold">{fmtYuan(draftTotal)}</span>
                 </span>
               )}
             </div>
           </div>
           <div>
-            <label className="text-xs text-ink-500">从哪期开始守</label>
+            <label className="text-xs text-ink-100">从哪期开始守</label>
             <div className="flex items-center gap-2 mt-1">
               <input
                 className="input"
@@ -233,7 +237,7 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                 全历史
               </button>
             </div>
-            <div className="text-xs text-ink-500 mt-1">
+            <div className="text-xs text-ink-100 mt-1">
               {draft.start_code
                 ? `从 ${draft.start_code} 期及之后才会结算`
                 : "从所有历史期开始结算（含已开奖）"}
@@ -252,37 +256,37 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
           {draft.type === "danTuo" ? (
             <>
               <div>
-                <div className="text-xs text-ink-500 mb-1">红胆（1~5 个）</div>
+                <div className="text-xs text-ink-100 mb-1">红胆（1~5 个）</div>
                 <BallPicker value={draft.payload.redDan} range={[1, 33]} onChange={(v) => setDraft({ ...draft, payload: { ...draft.payload, redDan: v } })} color="red" />
               </div>
               <div>
-                <div className="text-xs text-ink-500 mb-1">红拖（不能含胆码）</div>
+                <div className="text-xs text-ink-100 mb-1">红拖（不能含胆码）</div>
                 <BallPicker value={draft.payload.redTuo} range={[1, 33]} onChange={(v) => setDraft({ ...draft, payload: { ...draft.payload, redTuo: v } })} color="red" />
               </div>
             </>
           ) : (
             <div>
-              <div className="text-xs text-ink-500 mb-1">红球（1~33）</div>
+              <div className="text-xs text-ink-100 mb-1">红球（1~33）</div>
               <BallPicker value={draft.payload.red} range={[1, 33]} onChange={(v) => setDraft({ ...draft, payload: { ...draft.payload, red: v } })} color="red" />
             </div>
           )}
           <div>
-            <div className="text-xs text-ink-500 mb-1">蓝球（1~16）</div>
+            <div className="text-xs text-ink-100 mb-1">蓝球（1~16）</div>
             <BallPicker value={draft.payload.blue} range={[1, 16]} onChange={(v) => setDraft({ ...draft, payload: { ...draft.payload, blue: v } })} color="blue" />
           </div>
         </div>
 
-        {err && <div className="mt-3 text-sm text-red-700">{err}</div>}
+        {err && <div className="mt-3 text-sm text-rose-400">{err}</div>}
         <div className="mt-4 flex items-center gap-3">
           <button className="btn" disabled={busy} onClick={submit}>保存守号</button>
-          {draftUnits > 0 && <span className="text-sm text-ink-500">本期合计：<span className="font-mono font-semibold text-ink-900">{fmtYuan(draftTotal)}</span></span>}
+          {draftUnits > 0 && <span className="text-sm text-ink-100">本期合计：<span className="font-mono font-semibold text-ink-50">{fmtYuan(draftTotal)}</span></span>}
         </div>
       </div>
 
       <div className="card p-6">
         <h2 className="font-semibold mb-3">已有守号</h2>
         {list.length === 0 ? (
-          <div className="text-sm text-ink-500">暂无。</div>
+          <div className="text-sm text-ink-100">暂无。</div>
         ) : (
           <table className="tbl">
             <thead>

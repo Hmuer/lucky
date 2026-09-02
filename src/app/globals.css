@@ -3,12 +3,12 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 html, body {
-  background: #f7f7f5;
-  color: #1a1814;
+  background: #1f1d1a;
+  color: #e8e3d8;
 }
 
 .ball-red {
@@ -23,30 +23,46 @@ html, body {
 }
 
 .card {
-  background: #fff;
-  border: 1px solid #eeede8;
+  background: #2a2724;
+  border: 1px solid #3a3630;
   border-radius: 12px;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
 }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0.45rem 0.9rem; border-radius: 8px;
-  background: #1a1814; color: #fff; font-weight: 500;
+  background: #e8e3d8; color: #1f1d1a; font-weight: 500;
   transition: opacity .15s;
 }
 .btn:hover { opacity: 0.85; }
-.btn-ghost { background: transparent; color: #3f3a30; border: 1px solid #dcd9cf; }
-.btn-danger { background: #d9342b; }
-.btn-success { background: #2a8d4f; }
+.btn-ghost { background: transparent; color: #e8e3d8; border: 1px solid #3a3630; }
+.btn-ghost:hover { background: #34302b; }
+.btn-danger { background: #d9342b; color: #fff; }
+.btn-success { background: #2a8d4f; color: #fff; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .input {
   width: 100%; padding: 0.45rem 0.6rem; border-radius: 8px;
-  border: 1px solid #dcd9cf; background: #fff;
+  border: 1px solid #3a3630; background: #1f1d1a; color: #e8e3d8;
 }
-.input:focus { outline: 2px solid #b9b4a4; outline-offset: -1px; }
+.input::placeholder { color: #7a7363; }
+.input:focus { outline: 2px solid #7a7363; outline-offset: -1px; }
 
-table.tbl { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
-table.tbl th, table.tbl td { padding: 0.5rem 0.6rem; text-align: left; border-bottom: 1px solid #eeede8; }
-table.tbl thead th { background: #eeede8; font-weight: 600; }
+table.tbl { width: 100%; border-collapse: collapse; font-size: 0.92rem; color: #e8e3d8; }
+table.tbl th, table.tbl td { padding: 0.5rem 0.6rem; text-align: left; border-bottom: 1px solid #3a3630; }
+table.tbl thead th { background: #34302b; font-weight: 600; color: #a09b8c; }
+table.tbl tbody tr:hover { background: #34302b; }
+
+/* 选号球（未选状态） */
+.ball-pick-off {
+  background: #1f1d1a;
+  border: 1px solid #3a3630;
+  color: #a09b8c;
+}
+.ball-pick-off:hover {
+  background: #34302b;
+  color: #e8e3d8;
+}
+
+/* 选中状态的彩球仍用原色 */

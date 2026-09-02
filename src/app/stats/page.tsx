@@ -41,7 +41,7 @@ export default async function StatsPage() {
     <div className="space-y-6">
       <div className="card p-6">
         <h1 className="text-lg font-semibold">统计</h1>
-        <p className="text-sm text-ink-500 mt-1">基于已勾选"每期购买"的守号，按每期实际花费和中奖金额汇总。</p>
+        <p className="text-sm text-ink-100 mt-1">基于已勾选"每期购买"的守号，按每期实际花费和中奖金额汇总。</p>
         <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-4">
           <Stat label="参与期数" value={summary.draws.toString()} />
           <Stat label="累计花费" value={fmtYuan(summary.cost)} />
@@ -62,8 +62,8 @@ export default async function StatsPage() {
 function Stat({ label, value, highlight }: { label: string; value: string; highlight?: "pos" | "neg" }) {
   return (
     <div>
-      <div className="text-xs text-ink-500">{label}</div>
-      <div className={`font-mono text-xl ${highlight === "pos" ? "text-emerald-700" : highlight === "neg" ? "text-red-700" : ""}`}>{value}</div>
+      <div className="text-xs text-ink-100">{label}</div>
+      <div className={`font-mono text-xl ${highlight === "pos" ? "text-emerald-400" : highlight === "neg" ? "text-rose-400" : ""}`}>{value}</div>
     </div>
   );
 }
