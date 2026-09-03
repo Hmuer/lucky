@@ -313,7 +313,25 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
             </div>
           )}
           <div>
-            <div className="text-xs text-ink-100 mb-1">蓝球（1~16）</div>
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-xs text-ink-100">蓝球（1~16）</div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="btn btn-ghost text-[11px] px-2 py-0.5"
+                  onClick={() => setDraft({ ...draft, payload: { ...draft.payload, blue: Array.from({ length: 16 }, (_, i) => i + 1) } })}
+                >
+                  全选
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost text-[11px] px-2 py-0.5"
+                  onClick={() => setDraft({ ...draft, payload: { ...draft.payload, blue: [] } })}
+                >
+                  清空
+                </button>
+              </div>
+            </div>
             <BallPicker value={draft.payload.blue} range={[1, 16]} onChange={(v) => setDraft({ ...draft, payload: { ...draft.payload, blue: v } })} color="blue" />
           </div>
         </div>
