@@ -83,6 +83,10 @@ function countUnits(type: Type, p: any): number {
   return comb(p.redTuo.length, 6 - p.redDan.length) * Math.max(p.blue.length, 1);
 }
 
+function perPeriodUnits(b: Bet): number {
+  return countUnits(b.type, b.payload);
+}
+
 function fmtYuan(cents: number) {
   return (cents / 100).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 }
@@ -355,7 +359,7 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                 <th>类型</th>
                 <th>号码</th>
                 <th>开始期</th>
-                <th>单注</th>
+                <th>每期金额</th>
                 <th>购买</th>
                 <th>启用</th>
                 <th></th>
@@ -396,9 +400,15 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                     </td>
                     <td className="font-mono text-xs">
                       {editingId === b.id ? (
-                        <input className="input py-1 px-2 w-16" type="number" step="0.1" value={editUnit} onChange={(e) => setEditUnit(e.target.value)} />
+                        <div className="flex flex-col gap-1">
+                          <input className="input py-1 px-2 w-20" type="number" step="0.1" value={editUnit} onChange={(e) => setEditUnit(e.target.value)} title="每注单价（元）" />
+                          <span className="text-[10px] text-ink-200">每注元</span>
+                        </div>
                       ) : (
-                        `${(b.unit_price / 100).toFixed(2)} 元`
+                        <div>
+                          <div className="font-mono">{fmtYuan(b.unit_price * perPeriodUnits(b))}</div>
+                          <div className="text-[10px] text-ink-200">{perPeriodUnits(b)} 注 × {(b.unit_price / 100).toFixed(2)} 元</div>
+                        </div>
                       )}
                     </td>
                     <td>
