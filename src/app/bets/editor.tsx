@@ -91,6 +91,30 @@ function fmtYuan(cents: number) {
   return (cents / 100).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 }
 
+function Switch({
+  on,
+  onLabel,
+  offLabel,
+  onChange,
+  tone = "normal",
+}: {
+  on: boolean;
+  onLabel: string;
+  offLabel: string;
+  onChange: () => void;
+  tone?: "normal" | "danger";
+}) {
+  return (
+    <label className={`switch ${tone === "danger" ? "danger" : ""}`}>
+      <input type="checkbox" checked={on} onChange={onChange} />
+      <span className="track">
+        <span className="knob" />
+      </span>
+      <span className={on ? "label-on" : "label-off"}>{on ? onLabel : offLabel}</span>
+    </label>
+  );
+}
+
 const TIER_STYLES: Record<1 | 2 | 3 | 4 | 5 | 6, { on: string; label: string }> = {
   1: { on: "bg-rose-500/20 text-rose-300 border-rose-500/40", label: "一等" },
   2: { on: "bg-orange-500/20 text-orange-300 border-orange-500/40", label: "二等" },
@@ -365,8 +389,8 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                     <th>号码</th>
                     <th>开始期</th>
                     <th>每期金额</th>
-                    <th>购买</th>
-                    <th>启用</th>
+                    <th>每期是否购买</th>
+                    <th>启用状态</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -417,14 +441,21 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                           )}
                         </td>
                         <td>
-                          <button className={`btn ${b.buy_enabled ? "btn-success" : "btn-ghost"}`} onClick={() => toggle(b, "buy_enabled")}>
-                            {b.buy_enabled ? "是" : "否"}
-                          </button>
+                          <Switch
+                            on={!!b.buy_enabled}
+                            onLabel="每期买"
+                            offLabel="本期不买"
+                            onChange={() => toggle(b, "buy_enabled")}
+                          />
                         </td>
                         <td>
-                          <button className={`btn ${b.active ? "btn-success" : "btn-ghost"}`} onClick={() => toggle(b, "active")}>
-                            {b.active ? "启用" : "停用"}
-                          </button>
+                          <Switch
+                            on={!!b.active}
+                            onLabel="启用中"
+                            offLabel="已停用"
+                            tone="danger"
+                            onChange={() => toggle(b, "active")}
+                          />
                         </td>
                         <td className="flex gap-2">
                           {editingId === b.id ? (
@@ -459,13 +490,20 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                           {b.type === "single" ? "单式" : b.type === "complex" ? "复式" : "胆拖"} · {summarize(b)}
                         </div>
                       </div>
-                      <div className="flex gap-1 shrink-0">
-                        <button className={`btn ${b.buy_enabled ? "btn-success" : "btn-ghost"} text-xs px-2 py-1`} onClick={() => toggle(b, "buy_enabled")}>
-                          {b.buy_enabled ? "买" : "不买"}
-                        </button>
-                        <button className={`btn ${b.active ? "btn-success" : "btn-ghost"} text-xs px-2 py-1`} onClick={() => toggle(b, "active")}>
-                          {b.active ? "启" : "停"}
-                        </button>
+                      <div className="flex flex-col gap-1.5 shrink-0">
+                        <Switch
+                          on={!!b.buy_enabled}
+                          onLabel="每期买"
+                          offLabel="本期不买"
+                          onChange={() => toggle(b, "buy_enabled")}
+                        />
+                        <Switch
+                          on={!!b.active}
+                          onLabel="启用中"
+                          offLabel="已停用"
+                          tone="danger"
+                          onChange={() => toggle(b, "active")}
+                        />
                       </div>
                     </div>
 

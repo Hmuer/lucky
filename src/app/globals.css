@@ -42,6 +42,42 @@ html, body {
 .btn-success { background: #2a8d4f; color: #fff; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* 开关：圆角胶囊 + 圆点，on=绿 off=灰 */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+.switch input { display: none; }
+.switch .track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: #3a3630;
+  transition: background 0.18s ease;
+  flex-shrink: 0;
+}
+.switch .knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #e8e3d8;
+  transition: transform 0.18s ease;
+}
+.switch input:checked + .track { background: #2a8d4f; }
+.switch input:checked + .track .knob { transform: translateX(16px); }
+.switch input:disabled + .track { opacity: 0.5; cursor: not-allowed; }
+.switch .label-on { color: #6fcf97; font-size: 12px; font-weight: 600; }
+.switch .label-off { color: #7a7363; font-size: 12px; }
+.switch.danger input:checked + .track { background: #2a8d4f; }
+.switch.danger .label-on { color: #6fcf97; }
+
 .input {
   width: 100%; padding: 0.45rem 0.6rem; border-radius: 8px;
   border: 1px solid #3a3630; background: #1f1d1a; color: #e8e3d8;
