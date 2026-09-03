@@ -184,11 +184,19 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
 
   const toggle = async (b: Bet, key: "buy_enabled" | "active") => {
     const v = b[key] ? 0 : 1;
-    await fetch("/api/bets", {
+    // 停用守号时二次确认，避免误点导致从首页/统计消失
+    if (key === "active" && v === 0) {
+      if (!confirm(`停用"${b.name}" 后，该守号会从首页、统计、走势中消失（数据保留）。确定停用？`)) return;
+    }
+    const r = await fetch("/api/bets", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: b.id, [key]: v }),
     });
+    if (!r.ok) {
+      alert("保存失败，请重试");
+      return;
+    }
     setList(list.map((x) => (x.id === b.id ? { ...x, [key]: v } : x)));
     refreshStats();
   };
