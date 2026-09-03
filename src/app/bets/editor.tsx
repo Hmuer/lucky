@@ -250,20 +250,15 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
             <input className="input mt-1" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：生日组合" />
           </div>
           <div>
-            <label className="text-xs text-ink-100">单注金额（元）</label>
-            <div className="flex items-center gap-2 mt-1">
-              <input
-                className="input"
-                type="number"
-                min={1}
-                step={1}
-                value={draft.unit_price / 100}
-                onChange={(e) => setDraft({ ...draft, unit_price: Math.round(parseFloat(e.target.value || "0") * 100) || 200 })}
-              />
-              {draftUnits > 0 && (
-                <span className="text-sm text-ink-100 whitespace-nowrap">
-                  × {draftUnits} 注 = <span className="font-mono font-semibold">{fmtYuan(draftTotal)}</span>
-                </span>
+            <label className="text-xs text-ink-100">每期金额</label>
+            <div className="mt-1 px-3 py-2 rounded border border-ink-300 bg-ink-500/30 min-h-[40px] flex flex-col justify-center">
+              {draftUnits > 0 ? (
+                <>
+                  <div className="font-mono text-base font-semibold text-ink-50">{fmtYuan(draftTotal)}</div>
+                  <div className="text-[11px] text-ink-200">{draftUnits} 注 × {(draft.unit_price / 100).toFixed(2)} 元/注（单注固定 2 元）</div>
+                </>
+              ) : (
+                <span className="text-sm text-ink-200">选完号码自动计算</span>
               )}
             </div>
           </div>
@@ -343,7 +338,6 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
         {err && <div className="mt-3 text-sm text-rose-400">{err}</div>}
         <div className="mt-4 flex items-center gap-3">
           <button className="btn" disabled={busy} onClick={submit}>保存守号</button>
-          {draftUnits > 0 && <span className="text-sm text-ink-100">本期合计：<span className="font-mono font-semibold text-ink-50">{fmtYuan(draftTotal)}</span></span>}
         </div>
       </div>
 
