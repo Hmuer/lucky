@@ -176,17 +176,29 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
     setErr("");
     setBusy(true);
     try {
+      // 用一个标记位区分"全部期"和"下一期"：
+      // - mode="all" 或 draft.start_code=null → 不传 start_code 字段，后端写 null
+      // - mode="next" → 用 defaultStartCode（下一期）
+      // - mode="custom" → 用 draft.start_code
+      const submitBody: any = {
+        name: draft.name || "未命名",
+        type: draft.type,
+        payload: draft.payload,
+        unit_price: draft.unit_price,
+        buy_enabled: draft.buy_enabled,
+      };
+      if (draft.start_code === null) {
+        submitBody.start_code_mode = "all";
+      } else if (draft.start_code === defaultStartCode) {
+        submitBody.start_code_mode = "next";
+      } else {
+        submitBody.start_code = draft.start_code;
+        submitBody.start_code_mode = "custom";
+      }
       const r = await fetch("/api/bets", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name: draft.name || "未命名",
-          type: draft.type,
-          payload: draft.payload,
-          unit_price: draft.unit_price,
-          buy_enabled: draft.buy_enabled,
-          start_code: draft.start_code,
-        }),
+        body: JSON.stringify(submitBody),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? "failed");

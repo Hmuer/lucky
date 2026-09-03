@@ -32,8 +32,21 @@ export async function POST(req: Request) {
   const err = validateBet({ type, ...(payload as any) });
   if (err) return NextResponse.json({ error: err }, { status: 400 });
 
-  // start_code：默认从「下一期」开始守（即历史都不结算），也可显式指定
-  let startCode: string | null = b.start_code ?? nextExpected();
+  // start_code：根据 start_code_mode 决定写入的期号
+  // - "all"    → null（从所有已开奖期开始结算，含早期）
+  // - "next"   → nextExpected()（默认：仅结算下一期及之后）
+  // - "custom" → b.start_code（用户显式指定的期号）
+  // 兼容旧请求：未传 start_code_mode 时按"next"处理
+  let startCode: string | null;
+  const mode = b.start_code_mode;
+  if (mode === "all") {
+    startCode = null;
+  } else if (mode === "custom") {
+    startCode = b.start_code ?? nextExpected();
+  } else {
+    // "next" 或未传：保持原有默认行为
+    startCode = b.start_code ?? nextExpected();
+  }
   if (startCode && !/^\d{7}$/.test(startCode)) {
     return NextResponse.json({ error: "start_code 必须是 7 位期号，如 2026102" }, { status: 400 });
   }
