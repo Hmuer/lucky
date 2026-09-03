@@ -21,7 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <nav className="flex gap-1 text-sm">
               <Link className="px-3 py-1.5 rounded-md hover:bg-ink-500 text-ink-50" href="/">首页</Link>
               <Link className="px-3 py-1.5 rounded-md hover:bg-ink-500 text-ink-50" href="/bets">守号管理</Link>
-              <Link className="px-3 py-1.5 rounded-md hover:bg-ink-500 text-ink-50" href="/history">历史记录</Link>
+              <Link className="px-3 py-1.5 rounded-md hover:bg-ink-500 text-ink-50" href="/history">开奖记录</Link>
               <Link className="px-3 py-1.5 rounded-md hover:bg-ink-500 text-ink-50" href="/stats">统计</Link>
             </nav>
           </div>

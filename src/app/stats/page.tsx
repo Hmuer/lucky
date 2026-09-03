@@ -134,7 +134,7 @@ export default async function StatsPage() {
 
       <div className="card p-6">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h2 className="font-semibold">各守号历史中奖统计</h2>
+          <h2 className="font-semibold">各守号中奖统计</h2>
           <div className="text-xs text-ink-100">
             合计：
             <TierSumCell counts={tierTotals} />

@@ -22,7 +22,7 @@ export default async function HistoryPage() {
   return (
     <div className="space-y-6">
       <div className="card p-6">
-        <h1 className="text-lg font-semibold">历史命中记录</h1>
+        <h1 className="text-lg font-semibold">开奖记录</h1>
         <p className="text-sm text-ink-100 mt-1">展示每一期开奖号码与各守号命中情况。</p>
       </div>
 

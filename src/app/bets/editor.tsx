@@ -275,13 +275,13 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                 下一期
               </button>
               <button type="button" className="btn btn-ghost text-xs px-2 py-1" onClick={() => setDraft({ ...draft, start_code: null })}>
-                全历史
+                全部期
               </button>
             </div>
             <div className="text-xs text-ink-100 mt-1">
               {draft.start_code
                 ? `从 ${draft.start_code} 期及之后才会结算`
-                : "从所有历史期开始结算（含已开奖）"}
+                : "从所有已开奖期开始结算（含早期）"}
             </div>
           </div>
         </div>
