@@ -4,9 +4,9 @@
   "private": true,
   "description": "双色球守号自动监控：官方爬取开奖、按单式/复式/胆拖自动核对、Web 管理与统计",
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
-    "start": "next start -p 3000",
+    "start": "next start -H 0.0.0.0 -p 3000",
     "test:engine": "tsx src/lib/engine/__tests__/run.ts"
   },
   "dependencies": {

@@ -52,7 +52,7 @@ start_web() {
   fi
   need_deps
   info "启动 Web 服务 → :3000 (后台)"
-  nohup npx next dev -p 3000 > "$WEB_LOG" 2>&1 &
+  nohup npx next dev -H 0.0.0.0 -p 3000 > "$WEB_LOG" 2>&1 &
   echo $! > "$WEB_PID"
   # 等就绪
   for i in $(seq 1 30); do
@@ -116,7 +116,7 @@ case "${1:-}" in
   fg)
     need_deps
     info "前台启动 Web（Ctrl+C 退出）"
-    exec npx next dev -p 3000
+    exec npx next dev -H 0.0.0.0 -p 3000
     ;;
   all)
     start_web
@@ -130,7 +130,7 @@ case "${1:-}" in
     trap 'kill $(cat "$CRON_PID" 2>/dev/null) 2>/dev/null; rm -f "$CRON_PID"' EXIT INT TERM
     node scripts/cron.mjs &
     echo $! > "$CRON_PID"
-    exec npx next dev -p 3000
+    exec npx next dev -H 0.0.0.0 -p 3000
     ;;
   stop)
     stop_one "Cron" "$CRON_PID"
