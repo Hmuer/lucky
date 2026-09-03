@@ -149,7 +149,6 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editStart, setEditStart] = useState<string>("");
-  const [editUnit, setEditUnit] = useState<string>("");
 
   // 拉取所有守号的中奖统计
   const refreshStats = async () => {
@@ -240,14 +239,12 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
   const startEdit = (b: Bet) => {
     setEditingId(b.id ?? null);
     setEditStart(b.start_code ?? "");
-    setEditUnit(String(b.unit_price / 100));
   };
 
   const saveEdit = async () => {
     if (!editingId) return;
     const patch: any = { id: editingId };
     if (editStart !== "") patch.start_code = editStart.trim() || null;
-    if (editUnit) patch.unit_price = Math.round(parseFloat(editUnit) * 100);
     const r = await fetch("/api/bets", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -255,7 +252,7 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
     });
     const j = await r.json();
     if (!r.ok) { alert(j.error ?? "保存失败"); return; }
-    setList(list.map((x) => (x.id === editingId ? { ...x, ...(patch.start_code !== undefined ? { start_code: patch.start_code } : {}), ...(patch.unit_price !== undefined ? { unit_price: patch.unit_price } : {}) } : x)));
+    setList(list.map((x) => (x.id === editingId ? { ...x, ...(patch.start_code !== undefined ? { start_code: patch.start_code } : {}) } : x)));
     setEditingId(null);
     refreshStats();
   };
@@ -440,17 +437,10 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                           )}
                         </td>
                         <td className="font-mono text-xs">
-                          {editingId === b.id ? (
-                            <div className="flex flex-col gap-1">
-                              <input className="input py-1 px-2 w-20" type="number" step="0.1" value={editUnit} onChange={(e) => setEditUnit(e.target.value)} title="每注单价（元）" />
-                              <span className="text-[10px] text-ink-200">每注元</span>
-                            </div>
-                          ) : (
-                            <div>
-                              <div className="font-mono">{fmtYuan(b.unit_price * perPeriodUnits(b))}</div>
-                              <div className="text-[10px] text-ink-200">{perPeriodUnits(b)} 注 × {(b.unit_price / 100).toFixed(2)} 元</div>
-                            </div>
-                          )}
+                          <div>
+                            <div className="font-mono">{fmtYuan(b.unit_price * perPeriodUnits(b))}</div>
+                            <div className="text-[10px] text-ink-200">{perPeriodUnits(b)} 注 × {(b.unit_price / 100).toFixed(2)} 元</div>
+                          </div>
                         </td>
                         <td>
                           <Switch
@@ -522,16 +512,8 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-3 text-xs">
                       <div>
                         <div className="text-ink-200">每期金额</div>
-                        <div className="font-mono">
-                          {editingId === b.id ? (
-                            <input className="input py-1 px-2 w-20" type="number" step="0.1" value={editUnit} onChange={(e) => setEditUnit(e.target.value)} />
-                          ) : (
-                            <span>{fmtYuan(b.unit_price * perPeriodUnits(b))}</span>
-                          )}
-                        </div>
-                        {editingId !== b.id && (
-                          <div className="text-[10px] text-ink-200">{perPeriodUnits(b)} 注 × {(b.unit_price / 100).toFixed(2)} 元</div>
-                        )}
+                        <div className="font-mono">{fmtYuan(b.unit_price * perPeriodUnits(b))}</div>
+                        <div className="text-[10px] text-ink-200">{perPeriodUnits(b)} 注 × {(b.unit_price / 100).toFixed(2)} 元</div>
                       </div>
                       <div>
                         <div className="text-ink-200">开始期</div>
