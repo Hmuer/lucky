@@ -35,7 +35,10 @@
 - **开奖记录**：每期开奖号 + 各守号命中明细 + 当期盈亏
 - **盈亏统计**：累计花费、累计中奖、回本率、走势曲线（Recharts）
 - **守号历史中奖统计**：按守号聚合 1~6 等各中几注、单期最高奖金、累计花费/中奖/盈亏
-- **自动同步**：默认首页手动触发；可启用独立轮询进程，开奖日 21:30 后每 5 分钟拉取
+- **自动同步**：
+  - 首次启动自动回填 2003 年至今全部历史期（约 3600+ 期）
+  - 进程内定时器每 30 分钟拉取一次最新开奖
+  - 首页"立即同步开奖"按钮可手动触发增量同步
 
 ---
 
@@ -97,8 +100,12 @@ npm run dev
 
 ### 4. 首次同步开奖数据
 
-打开首页 → 点击右上角 **"立即同步开奖"** 按钮。
-首次会从中彩网拉取全部历史期（约 2000+ 期）入库，几十秒完成。
+首次启动时会**自动**从中彩网拉取全部历史期（约 3600+ 期）入库，
+写入 `data/ssq.db`，几十秒到一两分钟完成（取决于网络）。
+
+完成后会立刻对所有启用守号做一次全量核对。
+
+如果想强制重新同步：删除 `data/ssq.db` 重启，或在首页手动点 **"立即同步开奖"**。
 
 ### 5. 添加守号
 
@@ -115,16 +122,17 @@ npm run dev
 |---|---|
 | `./start.sh` 或 `./start.sh start` | 后台启动 Web，访问 :3000 |
 | `./start.sh fg` | 前台启动 Web（Ctrl+C 退出） |
-| `./start.sh all` | 后台启动 Web + 独立轮询（开奖日自动同步） |
-| `./start.sh all-fg` | 前台启动 Web + 轮询（一起 Ctrl+C 退出） |
 | `./start.sh status` | 查看进程 / 日志 / 数据库状态 |
-| `./start.sh logs` | 跟踪日志（Ctrl+C 退出） |
-| `./start.sh stop` | 停止所有进程 |
+| `./start.sh logs` | 跟踪 Web 日志（Ctrl+C 退出） |
+| `./start.sh stop` | 停止 Web 进程 |
 | `./start.sh test` | 跑引擎单测 |
 | `./start.sh reset` | 清空 SQLite 重新开始（需输入 yes 确认） |
 
-PID 文件：`logs/web.pid`、`logs/cron.pid`
-日志文件：`logs/web.log`、`logs/cron.log`
+PID 文件：`logs/web.pid`
+日志文件：`logs/web.log`
+
+> 定时同步已内置在 Web 进程内（每 30 分钟一次），无需额外启动 cron 进程。
+> 老版本里的 `./start.sh all` / `all-fg` 已被移除。
 
 Windows 用户如果没有 bash，可以直接 `npm run dev`，功能等价。
 
@@ -209,22 +217,22 @@ Windows 用户如果没有 bash，可以直接 `npm run dev`，功能等价。
 
 ## 定时同步
 
-手动同步：首页点击 **"立即同步开奖"**。
+进程内自带定时器，**无需任何额外配置**：
 
-自动同步（推荐，开奖日使用）：
+- **首次启动**：`src/instrumentation.ts` 触发 `ensureLatestSeed()`
+  - 库里无数据 → 调用 `backfillHistory()` 分页拉取全部历史期（约 3600+ 期，耗时 1~2 分钟）
+  - 库里有数据 → 直接 `syncLatest()` 增量同步
+  - 回填完成后会立刻对所有启用守号做一次全量核对
+- **运行中**：`startScheduler()` 每 **30 分钟**自动调一次 `syncLatest()`
+  - 只拉最近 20 期，按 `code` 主键 upsert，已存在的期会被刷新（官方有时会修正奖级金额）
+  - 模块级单例，多次 import 只启动一次
 
-```bash
-./start.sh all         # 后台模式
-# 或前台调试：
-./start.sh all-fg
-```
+手动同步：
 
-轮询逻辑（`scripts/cron.mjs`）：
-- 仅在 **开奖日**（周日、周二、周四）的 **21:30 之后** 工作
-- 每 5 分钟调一次 `/api/sync`
-- 拿到最新期后由接口内部去重，不会重复结算
+- 首页右上角 **"立即同步开奖"** 按钮立即触发增量同步（拉最近 20 期）
+- API：`POST /api/sync`（无 body）
 
-如果你想自定义频率，直接修改 `scripts/cron.mjs` 顶部的 `POLL_MS`。
+如果想调整定时器频率，修改 `src/lib/sync/runner.ts` 中的 `SYNC_INTERVAL_MS`。
 
 ---
 
@@ -268,7 +276,7 @@ lucky/
 ├── data/                   # SQLite 数据（自动生成，gitignore）
 ├── logs/                   # 启动脚本的 PID/日志
 ├── scripts/
-│   └── cron.mjs            # 独立轮询进程
+│   └── cron.mjs            # 可选：独立的外部轮询进程（默认不需要，定时同步已内置）
 ├── src/
 │   ├── app/                # Next.js App Router
 │   │   ├── api/            # REST API 路由
@@ -285,12 +293,14 @@ lucky/
 │   ├── components/         # 客户端组件
 │   │   ├── Balls.tsx       # 红/蓝号码球
 │   │   └── SyncButton.tsx  # 同步按钮
+│   ├── instrumentation.ts  # 进程级入口：触发首次回填 + 启动定时同步
 │   └── lib/
 │       ├── engine/         # 投注展开 + 命中结算 + 奖级表（纯函数，可单测）
 │       ├── crawler/        # 中彩网爬取
 │       ├── db/             # SQLite 仓库
-│       └── sync/           # 守号↔引擎适配 + 同步执行
+│       └── sync/           # 守号↔引擎适配 + 同步执行（含 backfillHistory / startScheduler）
 ├── start.sh                # 一键启动脚本
+├── next.config.mjs         # 启用 instrumentationHook
 ├── package.json
 └── README.md
 ```

@@ -1,5 +1,11 @@
 /**
  * 自动同步：拉取最新开奖 → 入库 → 对所有启用守号做命中结算 → 写 hit_records
+ *
+ * 同步策略：
+ * 1. 历史回填（一次性）：首次启动 / 库里为空时，分页拉取 2003 年至今所有期号入库。
+ *    回填完成后写入 meta: history_backfilled=1，下次不再回填。
+ * 2. 增量同步（定时）：进程内每 30 分钟拉取最近 20 期（增量，按 code 主键 upsert）。
+ * 3. 命中结算：每条入库的开奖都会和所有 active=1 且 buy_enabled=1 的守号核对。
  */
 
 import { fetchLatestDraws, parseDrawRow } from "../crawler/cwl";
@@ -130,15 +136,151 @@ export async function syncOne(code: string): Promise<SyncReport> {
   return report;
 }
 
-/** 启动时异步触发一次（best-effort） */
+/** 启动时异步触发一次（best-effort）
+ *  1. 库里为空：先做历史回填（拉全量历史期），回填完后同步一遍命中
+ *  2. 库里已有数据：只做一次增量同步
+ *  回填过的不再回填，标志写入 app_meta.history_backfilled
+ */
 export function ensureLatestSeed(): void {
   void (async () => {
     try {
-      await syncLatest();
+      const { getMeta } = await import("../db");
+      const backfilled = getMeta("history_backfilled") === "1";
+      const haveAny = listDraws(1).length > 0;
+      if (!backfilled && !haveAny) {
+        console.log("[sync] 历史回填开始...");
+        const r = await backfillHistory();
+        console.log(`[sync] 历史回填完成: 拉取 ${r.fetched} 期，入库 ${r.saved} 期`);
+        // 回填完成后立即和现有守号核对一次
+        await settleAllBets();
+      } else {
+        await syncLatest();
+      }
     } catch (e) {
       console.error("[ensureLatestSeed] failed:", e);
     }
   })();
+}
+
+/**
+ * 历史回填：分页拉取所有期号入库
+ * 中彩网接口不返回总数，但 pageSize=30 的接口连续翻页直到返回 < 30 即结束
+ * 双色球 2003 年至今约 3600+ 期，按 30/页约 120 页
+ * 单页失败不中断整体流程，跳过继续下一页
+ */
+export async function backfillHistory(): Promise<{ fetched: number; saved: number; pages: number; errors: string[] }> {
+  const report = { fetched: 0, saved: 0, pages: 0, errors: [] as string[] };
+  const pageSize = 30;
+  let page = 1;
+  const maxPages = 200; // 安全上限（约 6000 期，远超历史总数）
+
+  while (page <= maxPages) {
+    let rows;
+    try {
+      const url = `https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&pageNo=${page}&pageSize=${pageSize}`;
+      const headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36",
+        Referer: "https://www.cwl.gov.cn/",
+        Accept: "application/json, text/plain, */*",
+      };
+      const r = await fetch(url, { headers, cache: "no-store" });
+      if (!r.ok) {
+        report.errors.push(`page ${page} http ${r.status}`);
+        page++;
+        continue;
+      }
+      const j = (await r.json()) as { state: number; message?: string; result?: any[] };
+      if (j.state !== 0 || !j.result) {
+        report.errors.push(`page ${page} state=${j.state} ${j.message ?? ""}`);
+        page++;
+        continue;
+      }
+      rows = j.result;
+    } catch (e: any) {
+      report.errors.push(`page ${page}: ${e?.message ?? e}`);
+      page++;
+      continue;
+    }
+
+    report.pages++;
+    // 接口默认升序（旧→新），保留原序以便断点续拉时去重
+    for (const raw of rows) {
+      try {
+        const parsed = parseDrawRow(raw);
+        // 检查是否已存在，存在则跳过（支持断点续拉）
+        if (getDraw(parsed.code)) continue;
+        upsertDraw(parsed as any);
+        report.saved++;
+      } catch (e: any) {
+        report.errors.push(`page ${page} ${raw?.code}: ${e?.message ?? e}`);
+      }
+    }
+    report.fetched += rows.length;
+
+    if (rows.length < pageSize) break; // 最后一页
+    page++;
+
+    // 翻页间加一点间隔，避免被反爬
+    await sleep(150);
+  }
+
+  setMeta("history_backfilled", "1");
+  setMeta("last_backfill_at", new Date().toISOString());
+  return report;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+/**
+ * 对所有启用守号、按当前 start_code 重新结算库内全部历史开奖
+ * 用于：历史回填后批量核对、用户改 start_code 后追溯
+ */
+export function settleAllBets(): Promise<{ bet: number; recalc: number }> {
+  return Promise.resolve().then(() => {
+    const bets = listBets(true); // 只处理 active=1
+    let totalRecalc = 0;
+    for (const b of bets) {
+      const r = resyncBet(b.id);
+      totalRecalc += r.recalc;
+    }
+    return { bet: bets.length, recalc: totalRecalc };
+  });
+}
+
+/**
+ * 进程内定时器：每 30 分钟拉一次最新开奖
+ * 模块级单例，多次 import 只启动一次
+ */
+let _schedulerStarted = false;
+const SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 分钟
+
+export function startScheduler(): void {
+  if (_schedulerStarted) return;
+  _schedulerStarted = true;
+  console.log(`[sync] 定时器已启动：每 ${SYNC_INTERVAL_MS / 60000} 分钟拉取一次最新开奖`);
+
+  // 延迟 5 秒首次启动，避免和 ensureLatestSeed 撞车
+  setTimeout(() => {
+    void tick();
+    setInterval(() => {
+      void tick();
+    }, SYNC_INTERVAL_MS);
+  }, 5000);
+}
+
+async function tick(): Promise<void> {
+  try {
+    const r = await syncLatest();
+    if (r.saved > 0) {
+      console.log(`[sync] 定时同步完成: 拉取 ${r.fetched} 期，新增/更新 ${r.saved} 期`);
+    } else {
+      console.log(`[sync] 定时同步完成: 无新数据`);
+    }
+  } catch (e: any) {
+    console.error("[sync] 定时同步失败:", e?.message ?? e);
+  }
 }
 
 /**
