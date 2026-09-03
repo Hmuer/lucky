@@ -25,7 +25,7 @@ interface BetStatRow {
 }
 
 function buildBetStats(): BetStatRow[] {
-  const bets = listBets(false);
+  const bets = listBets(true); // 只统计启用守号
   return bets.map((b) => {
     const hits = listHitsByBet(b.id!);
     const tier_counts: TierCounts = { ...ZERO_TIER };

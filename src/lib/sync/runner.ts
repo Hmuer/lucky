@@ -16,6 +16,17 @@ export interface SyncReport {
   errors: string[];
 }
 
+/**
+ * 判断该守号是否在当前期参与核对
+ * - 停用（active=0）：完全不参与
+ * - 该期不购买（buy_enabled=0）：跳过当期
+ */
+function shouldSettle(b: { active: number; buy_enabled: number }): boolean {
+  if (!b.active) return false;
+  if (!b.buy_enabled) return false;
+  return true;
+}
+
 function prizeAmountsFrom(drawRow: DrawRow): Partial<Record<PrizeTier, number>> {
   return {
     1: drawRow.prize1_amount ?? undefined,
@@ -53,7 +64,7 @@ export async function syncLatest(): Promise<SyncReport> {
       const prizeAmounts = prizeAmountsFrom(drawRow);
 
       for (const b of bets) {
-        if (!b.buy_enabled) continue;
+        if (!shouldSettle(b)) continue;
         // start_code 过滤：只在开始期及之后才结算
         if (b.start_code && parsed.code < b.start_code) continue;
         const bet = rowToBet(b);
@@ -98,7 +109,7 @@ export async function syncOne(code: string): Promise<SyncReport> {
     const prizeAmounts = prizeAmountsFrom(drawRow);
     const bets = listBets(true);
     for (const b of bets) {
-      if (!b.buy_enabled) continue;
+      if (!shouldSettle(b)) continue;
       if (b.start_code && parsed.code < b.start_code) continue;
       const bet = rowToBet(b);
       const result = settle(bet, draw, { prizeAmounts });
@@ -145,7 +156,7 @@ export function resyncBet(betId: number): { recalc: number; deleted: number } {
   const startCode = bet.start_code ?? "0000000";
   for (const drawRow of draws) {
     if (drawRow.code < startCode) continue;
-    if (!bet.buy_enabled) continue;
+    if (!shouldSettle(bet)) continue;
     const draw = {
       red: drawRow.red.split(",").map((x) => parseInt(x, 10)),
       blue: parseInt(drawRow.blue, 10),
