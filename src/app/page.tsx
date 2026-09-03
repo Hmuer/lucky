@@ -10,23 +10,43 @@ function fmtYuan(cents: number) {
   return (cents / 100).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 }
 
+// 用 globalThis 做模块级单例：避免多次 SSR 请求 / HMR 时重复启动定时器
+declare global {
+  // eslint-disable-next-line no-var
+  var __ssq_scheduler_started: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var __ssq_seed_started: boolean | undefined;
+}
+
+/** 懒启动：第一次 SSR 时触发首次回填 + 启动定时同步 */
+async function bootstrapSyncOnce() {
+  if (!globalThis.__ssq_seed_started) {
+    globalThis.__ssq_seed_started = true;
+    const { ensureLatestSeed } = await import("@/lib/sync/runner");
+    ensureLatestSeed();
+  }
+  if (!globalThis.__ssq_scheduler_started) {
+    globalThis.__ssq_scheduler_started = true;
+    const { startScheduler } = await import("@/lib/sync/runner");
+    startScheduler();
+  }
+}
+
 export default async function HomePage() {
   noStore();
   const latest = latestDraw();
   const bets = listBets(true);
   const lastSync = getMeta("last_sync_at");
 
-  // 启动时异步触发一次同步（不阻塞首屏）
-  if (!latest) {
-    const { ensureLatestSeed } = await import("@/lib/sync/runner");
-    ensureLatestSeed();
-  }
+  // 第一次 SSR 时异步触发同步（不阻塞首屏）
+  // 用 await 让请求的尾段才执行，保证不阻塞首字节返回
+  void bootstrapSyncOnce();
 
   if (!latest) {
     return (
       <div className="card p-6">
         <h1 className="text-lg font-semibold mb-2">还没有数据</h1>
-        <p className="text-sm text-ink-100 mb-4">点下面的按钮同步一次中彩网开奖数据。</p>
+        <p className="text-sm text-ink-100 mb-4">首次启动正在自动拉取中彩网历史开奖数据，请稍等几十秒到一两分钟，刷新页面即可。</p>
         <SyncButton />
       </div>
     );
