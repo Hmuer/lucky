@@ -111,7 +111,7 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
   const [draft, setDraft] = useState<Bet>({
     name: "",
     type: "complex",
-    payload: { red: [], blue: Array.from({ length: 16 }, (_, i) => i + 1) },
+    payload: { red: [], blue: [] as number[] },
     unit_price: 200,
     buy_enabled: 1,
     active: 1,
