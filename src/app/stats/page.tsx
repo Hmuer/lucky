@@ -41,10 +41,12 @@ function buildBetStats(): BetStatRow[] {
         if (h.win_amount > bestWin) bestWin = h.win_amount;
       }
       try {
-        const bd = JSON.parse(h.breakdown);
-        for (const e of bd) {
-          if (e.tier >= 1 && e.tier <= 6) {
-            tier_counts[e.tier as 1 | 2 | 3 | 4 | 5 | 6] += e.count || 0;
+        // breakdown 是对象：{ "1": {count, amount, unit}, "2": {...}, ... }
+        const bd = JSON.parse(h.breakdown) as Record<string, { count?: number }>;
+        for (const [k, v] of Object.entries(bd)) {
+          const tier = parseInt(k, 10);
+          if (tier >= 1 && tier <= 6) {
+            tier_counts[tier as 1 | 2 | 3 | 4 | 5 | 6] += v?.count || 0;
           }
         }
       } catch {}
