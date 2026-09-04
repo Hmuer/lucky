@@ -10,6 +10,13 @@ function fmtYuan(cents: number) {
   return (cents / 100).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 }
 
+function typeLabel(t: string): string {
+  if (t === "single") return "单式";
+  if (t === "complex") return "复式";
+  if (t === "danTuo") return "胆拖";
+  return t;
+}
+
 // 用 globalThis 做模块级单例：避免多次 SSR 请求 / HMR 时重复启动定时器
 declare global {
   // eslint-disable-next-line no-var
@@ -122,7 +129,7 @@ export default async function HomePage() {
                 return (
                   <tr key={b.id}>
                     <td className="font-medium">{b.name}</td>
-                    <td>{b.type}</td>
+                    <td>{typeLabel(b.type)}</td>
                     <td>{hit?.units ?? "-"}</td>
                     <td className="font-mono">{hit ? fmtYuan(hit.cost) : "-"}</td>
                     <td>
@@ -135,7 +142,7 @@ export default async function HomePage() {
                   </tr>
                 );
               })}
-              <tr className="bg-ink-50 font-semibold">
+              <tr className="bg-ink-700 font-semibold">
                 <td colSpan={3}>合计</td>
                 <td className="font-mono">{fmtYuan(totalCost)}</td>
                 <td></td>
