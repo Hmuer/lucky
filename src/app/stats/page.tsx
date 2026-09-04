@@ -1,4 +1,4 @@
-import { StatsCharts } from "./charts";
+import { StatsChartsWithRange } from "./StatsChartsWithRange";
 import { listAllHits, listBets, listDraws, listHitsByBet } from "@/lib/db";
 import { unstable_noStore as noStore } from "next/cache";
 
@@ -86,14 +86,6 @@ export default async function StatsPage() {
     series.push({ code, date: draw?.date ?? code, cost, win, cumCost, cumWin, profit: cumWin - cumCost });
   }
 
-  const summary = {
-    draws: series.length,
-    cost: cumCost,
-    win: cumWin,
-    profit: cumWin - cumCost,
-    roi: cumCost ? (cumWin - cumCost) / cumCost : 0,
-  };
-
   const betStats = buildBetStats().sort((a, b) => {
     // 按最高奖级命中次数降序，再按盈亏降序
     const tierRankA = a.tier_counts[1] * 1e6 + a.tier_counts[2] * 1e4 + a.tier_counts[3] * 100 + a.tier_counts[4];
@@ -119,19 +111,10 @@ export default async function StatsPage() {
     <div className="space-y-6">
       <div className="card p-6">
         <h1 className="text-lg font-semibold">统计</h1>
-        <p className="text-sm text-ink-100 mt-1">基于已勾选"每期购买"的守号，按每期实际花费和中奖金额汇总。</p>
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-4">
-          <Stat label="参与期数" value={summary.draws.toString()} />
-          <Stat label="累计花费" value={fmtYuan(summary.cost)} />
-          <Stat label="累计中奖" value={fmtYuan(summary.win)} />
-          <Stat label="盈亏" value={fmtYuan(summary.profit)} highlight={summary.profit >= 0 ? "pos" : "neg"} />
-          <Stat label="回本率" value={(summary.roi * 100).toFixed(1) + "%"} highlight={summary.profit >= 0 ? "pos" : "neg"} />
+        <p className="text-sm text-ink-100 mt-1">基于已勾选"每期购买"的守号。顶部汇总与走势图会随下方时间范围按钮联动；"各守号中奖统计"始终为全期累计。</p>
+        <div className="mt-4">
+          <StatsChartsWithRange series={series} />
         </div>
-      </div>
-
-      <div className="card p-6">
-        <h2 className="font-semibold mb-3">走势</h2>
-        <StatsCharts series={series} />
       </div>
 
       <div className="card p-6">
@@ -227,14 +210,5 @@ function TierSumCell({ counts }: { counts: TierCounts }) {
         );
       })}
     </span>
-  );
-}
-
-function Stat({ label, value, highlight }: { label: string; value: string; highlight?: "pos" | "neg" }) {
-  return (
-    <div>
-      <div className="text-xs text-ink-100">{label}</div>
-      <div className={`font-mono text-xl ${highlight === "pos" ? "text-emerald-400" : highlight === "neg" ? "text-rose-400" : ""}`}>{value}</div>
-    </div>
   );
 }
