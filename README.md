@@ -404,7 +404,7 @@ curl --fail http://127.0.0.1:3000/api/health
 | `WX_APPSECRET` | 小程序 AppSecret |
 | `JWT_SECRET` | JWT 签名密钥，至少 16 位随机串 |
 | `CRON_SECRET` | 外部定时器调用 `/api/wx/sync` 的校验密钥 |
-| `WX_SUBSCRIBE_TEMPLATE_ID` | 订阅消息模板 ID |
+| `WX_SUBSCRIBE_TEMPLATE_ID` | 订阅消息模板 ID（可后补；为空时自动跳过推送） |
 | `DEFAULT_USER_OPENID` | 存量数据/网页端默认用户，缺省 `__default__` |
 | `WX_TEMPLATE_FIELD_*` | 可选，模板字段名，默认 `thing1` / `character_string2` / `amount3` |
 | `WX_SUBSCRIBE_PAGE` | 可选，点击订阅消息跳转的小程序页面 |
@@ -416,6 +416,7 @@ curl --fail http://127.0.0.1:3000/api/health
 - 同步到新期后，只给 `subscriptions.accepted = 1` 且本期有启用守号/命中记录的用户推送。
 - 推送字段至少包含期号、开奖号码、该用户盈亏；`43101` 静默跳过，`40001` 强制刷新 token 后重试一次。
 - 推送失败不会中断同步或其他用户。
+- `WX_SUBSCRIBE_TEMPLATE_ID` 为空时，`/api/wx/subscribe-config` 返回空 `templateId`，同步后自动跳过推送并记录一条日志；其他功能不受影响。
 
 ---
 

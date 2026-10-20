@@ -91,6 +91,9 @@ Success:
 
 小程序拿到后调用 `wx.requestSubscribeMessage({ tmplIds: [templateId] })`。
 
+如果服务端暂未配置 `WX_SUBSCRIBE_TEMPLATE_ID`，`templateId` 返回空字符串 `""`；
+此时订阅功能自动关闭，小程序端可跳过订阅入口，不影响登录、守号、同步等其他功能。
+
 ---
 
 ## 3. 上报订阅授权

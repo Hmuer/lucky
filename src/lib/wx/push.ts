@@ -99,6 +99,11 @@ export async function sendSubscribeMessage(
  * 返回成功发送数量；单个用户失败不影响其他人。
  */
 export async function notifyDraw(drawCode: string): Promise<number> {
+  if (!subscribeTemplateId()) {
+    console.log("[wx] 未配置 WX_SUBSCRIBE_TEMPLATE_ID，跳过推送");
+    return 0;
+  }
+
   const draw = await getDraw(drawCode);
   if (!draw) return 0;
 
