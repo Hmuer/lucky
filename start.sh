@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 双色球守号监控 - 一键启动（仅开发模式）
 # 生产环境请使用 systemd 的 lucky.service，日志走 journald。
+# 首次使用：./scripts/bootstrap-node.sh
 # 用法：
 #   ./start.sh           # 启动 Web（默认后台）。进程内自带定时同步，无需额外 cron。
 #   ./start.sh fg        # 前台运行 Web
@@ -23,6 +24,8 @@ mkdir -p "$LOGS"
 
 WEB_PID="$LOGS/web.pid"
 WEB_LOG="$LOGS/web.log"
+RUNTIME_NODE="$ROOT/.runtime/node/bin/node"
+RUNTIME_NPM="$ROOT/scripts/npm.sh"
 
 color() { printf "\033[1;%sm%s\033[0m\n" "$1" "$2"; }
 info()  { color 36 "[i] $*"; }
@@ -30,10 +33,19 @@ ok()    { color 32 "[✔] $*"; }
 warn()  { color 33 "[!] $*"; }
 err()   { color 31 "[✘] $*"; }
 
+need_runtime() {
+  if [ ! -x "$RUNTIME_NODE" ]; then
+    err "未安装项目内 Node 运行时：$RUNTIME_NODE"
+    info "请先执行：./scripts/bootstrap-node.sh"
+    return 1
+  fi
+}
+
 need_deps() {
+  need_runtime
   if [ ! -d node_modules ]; then
     info "安装依赖（首次运行，可能需要 1~3 分钟）..."
-    npm install --no-audit --no-fund --loglevel=error
+    "$RUNTIME_NPM" ci --no-audit --no-fund --loglevel=error
     ok "依赖安装完成"
   fi
 }
@@ -54,7 +66,7 @@ start_web() {
     echo "===== $(date '+%F %T') next dev 启动（仅开发模式） ====="
     echo "===== 生产日志请用：journalctl -u lucky.service -f ====="
   } > "$WEB_LOG"
-  nohup node scripts/run-next.mjs dev -H 127.0.0.1 -p 3000 >> "$WEB_LOG" 2>&1 &
+  nohup "$RUNTIME_NODE" scripts/run-next.mjs dev -H 127.0.0.1 -p 3000 >> "$WEB_LOG" 2>&1 &
   echo $! > "$WEB_PID"
   # 等就绪
   for i in $(seq 1 30); do
@@ -105,7 +117,7 @@ case "${1:-}" in
   fg)
     need_deps
     info "前台启动 Web（Ctrl+C 退出）"
-    exec node scripts/run-next.mjs dev -H 127.0.0.1 -p 3000
+    exec "$RUNTIME_NODE" scripts/run-next.mjs dev -H 127.0.0.1 -p 3000
     ;;
   all)
     warn "all 模式已被移除：定时同步已内置在 Web 进程内（每 30 分钟一次），"
@@ -117,7 +129,7 @@ case "${1:-}" in
   all-fg|allfg)
     warn "all-fg 已被移除：定时同步已内置在 Web 进程内，直接 ./start.sh fg 即可。"
     need_deps
-    exec node scripts/run-next.mjs dev -H 127.0.0.1 -p 3000
+    exec "$RUNTIME_NODE" scripts/run-next.mjs dev -H 127.0.0.1 -p 3000
     ;;
   stop)
     stop_one "Web"  "$WEB_PID"
@@ -128,7 +140,7 @@ case "${1:-}" in
   test)
     need_deps
     info "运行引擎单测"
-    npm run test:engine
+    "$RUNTIME_NPM" run test:engine
     ;;
   logs)
     if [ ! -f "$WEB_LOG" ]; then

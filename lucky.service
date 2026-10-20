@@ -9,8 +9,9 @@ User=root
 Group=root
 WorkingDirectory=/opt/lucky/lucky
 Environment=NODE_ENV=production
-Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/root/.local/bin/npm run start
+# 运行时由 scripts/bootstrap-node.sh 安装到 .runtime/，不使用宿主机 Node
+Environment=PATH=/opt/lucky/lucky/.runtime/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/lucky/lucky/scripts/npm.sh run start
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
