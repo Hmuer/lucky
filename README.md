@@ -128,7 +128,7 @@ CREATE DATABASE lucky CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ./scripts/npm.sh run migrate:mysql
 ```
 
-迁移会校验行数与金额合计；`data/ssq.db` 会保留作为备份。
+迁移会校验行数与金额合计；本部署已将 `data/ssq.db` 归档到 `/opt/lucky/backups/`，并删除项目内文件。
 
 ### 4. 启动 Web 服务
 
@@ -357,7 +357,7 @@ curl --fail http://127.0.0.1:3000/api/health
   - `app_meta`：最后同步时间等元信息（`meta_key` / `value`）
 - **迁移**：`./scripts/npm.sh run migrate:mysql`（从 `data/ssq.db` 一次性导入，可重复执行并校验）
 - **备份**：用 TDSQL-C 控制台备份，或 `mysqldump --single-transaction`
-- **本地 SQLite**：`data/ssq.db` 仅作为迁移前备份，应用不再写入
+- **本地 SQLite**：本部署已归档到 `/opt/lucky/backups/`，项目内 `data/` 已清空，应用不再写入
 - **重置**：`./start.sh reset` 只打印说明，不再删库；清空需手动执行 SQL
 
 ---
@@ -420,7 +420,7 @@ A: 浮动奖级（1/2 等）的金额来自官方 `typemoney` 字段；个别期
 A: 中彩网当前接口只提供 2013 年至今的开奖记录（约 2,000 期）。更早的数据需要接入其它数据源，本工具未内置。
 
 **Q: 怎么从旧 SQLite 迁移？**
-A: 保留 `data/ssq.db`，配置好 `.env.local` 后执行 `./scripts/npm.sh run migrate:mysql`。脚本会建库建表、批量导入并校验行数与金额，可重复执行。
+A: 如果还有 `data/ssq.db`，配置好 `.env.local` 后执行 `./scripts/npm.sh run migrate:mysql`。脚本会建库建表、批量导入并校验行数与金额，可重复执行。本部署的旧库已归档到 `/opt/lucky/backups/`，需要时可先解压恢复。
 
 **Q: 为什么项目里要单独放一个 Node？**
 A: 固定 Node 22 可以保证构建和运行使用同一 ABI/版本；迁移脚本仍用 `better-sqlite3` 读取旧库，原生模块对 Node 主版本敏感。`.runtime` 不提交 Git，删掉后重新执行 `./scripts/bootstrap-node.sh` 即可。
@@ -453,7 +453,7 @@ lucky/
 ├── .env.local              # 实际 MySQL 连接串（gitignore）
 ├── .node-version           # 固定的 Node 版本（22.23.2）
 ├── .runtime/               # 项目内 Node（bootstrap 生成，gitignore，约 200MB）
-├── data/                   # 迁移前 SQLite 备份（gitignore）
+├── data/                   # 迁移临时目录（旧 SQLite 已归档到项目外）
 ├── logs/                   # 启动脚本的 PID/日志
 ├── scripts/
 │   ├── bootstrap-node.sh   # 下载/校验/解压 Node 到 .runtime

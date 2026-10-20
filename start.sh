@@ -155,7 +155,7 @@ case "${1:-}" in
     ;;
   reset)
     warn "数据已迁移到 TDSQL-C MySQL，start.sh reset 不再删除数据库。"
-    info "本地 data/ssq.db 仅作为迁移前备份，可手动删除。"
+    info "旧 SQLite 已归档到项目外（本部署为 /opt/lucky/backups/），项目内 data/ 为空。"
     info "如需清空线上数据，请用 MySQL 客户端连接 DATABASE_URL 后手动操作（谨慎）。"
     ;;
   ""|start)
