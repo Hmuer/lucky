@@ -1,0 +1,21 @@
+.head {
+  margin-bottom: 24rpx;
+}
+
+.add {
+  padding: 16rpx 32rpx;
+}
+
+.add-empty {
+  width: 320rpx;
+  margin: 28rpx auto 0;
+}
+
+.meta {
+  margin-top: 18rpx;
+}
+
+.danger {
+  color: #fb7185;
+  border-color: rgba(251, 113, 133, 0.4);
+}

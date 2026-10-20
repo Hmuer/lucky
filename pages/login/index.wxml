@@ -1,0 +1,18 @@
+<view class="login">
+  <view class="brand">
+    <view class="brand-mark">幸</view>
+    <view class="subtitle">幸运数字</view>
+    <view class="muted login-tip">记录你的数字组合</view>
+  </view>
+
+  <view class="card login-card">
+    <view class="login-line">简单记录 · 清晰回顾</view>
+    <view class="muted login-desc">
+      保存自己的数字组合，查看最新结果、历史记录和统计变化。
+    </view>
+    <button class="btn login-btn" loading="{{loading}}" disabled="{{loading}}" bindtap="start">
+      开始使用
+    </button>
+    <view class="muted login-note">仅用于个人数字记录</view>
+  </view>
+</view>

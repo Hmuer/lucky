@@ -1,0 +1,11 @@
+.type-desc {
+  margin-top: 14rpx;
+}
+
+.special-grid {
+  grid-template-columns: repeat(8, 1fr);
+}
+
+.save {
+  margin-top: 12rpx;
+}

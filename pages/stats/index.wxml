@@ -1,0 +1,80 @@
+<view class="page">
+  <view class="head">
+    <view class="subtitle">统计</view>
+    <view class="muted">仅统计启用中的组合</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="card empty">加载中…</view>
+  <view wx:elif="{{error}}" class="card empty">{{error}}</view>
+
+  <block wx:elif="{{stats}}">
+    <view class="card">
+      <view class="stat-grid">
+        <view class="stat">
+          <view class="muted">参与次数</view>
+          <view class="value">{{stats.summary.periods}}</view>
+        </view>
+        <view class="stat">
+          <view class="muted">有变化次数</view>
+          <view class="value">{{stats.summary.hitPeriods}}</view>
+        </view>
+        <view class="stat">
+          <view class="muted">累计记录</view>
+          <view class="value">¥{{stats.summary.valueText}}</view>
+        </view>
+        <view class="stat">
+          <view class="muted">累计变化</view>
+          <view class="value {{stats.summary.changeClass}}">{{stats.summary.changeText}}</view>
+        </view>
+      </view>
+
+      <view class="divider"></view>
+
+      <view class="label">匹配统计</view>
+      <view class="levels">
+        <view wx:if="{{stats.summary.levels.length === 0}}" class="muted">暂无匹配</view>
+        <view wx:for="{{stats.summary.levels}}" wx:key="key" class="match hit">
+          {{item.label}} ×{{item.count}}
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{stats.records.length === 0}}" class="card empty">还没有组合</view>
+
+    <view wx:for="{{stats.records}}" wx:key="id" class="card">
+      <view class="row between">
+        <view class="row">
+          <view class="value">{{item.name}}</view>
+          <view class="tag">{{item.typeLabel}}</view>
+        </view>
+        <view class="value {{item.changeClass}}">{{item.changeText}}</view>
+      </view>
+
+      <view class="stat-grid compact">
+        <view class="stat">
+          <view class="muted">参与次数</view>
+          <view class="value">{{item.periods}}</view>
+        </view>
+        <view class="stat">
+          <view class="muted">有变化次数</view>
+          <view class="value">{{item.hitPeriods}}</view>
+        </view>
+        <view class="stat">
+          <view class="muted">累计记录</view>
+          <view class="value">¥{{item.valueText}}</view>
+        </view>
+        <view class="stat">
+          <view class="muted">单次最高</view>
+          <view class="value">{{item.bestText}}</view>
+        </view>
+      </view>
+
+      <view class="levels">
+        <view wx:if="{{item.levels.length === 0}}" class="muted">暂无匹配</view>
+        <view wx:for="{{item.levels}}" wx:for-item="level" wx:key="key" class="match hit">
+          {{level.label}} ×{{level.count}}
+        </view>
+      </view>
+    </view>
+  </block>
+</view>

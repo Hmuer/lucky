@@ -1,0 +1,20 @@
+{
+  "pages": [
+    "pages/login/index",
+    "pages/home/index",
+    "pages/records/index",
+    "pages/record-form/index",
+    "pages/history/index",
+    "pages/stats/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "幸运数字",
+    "navigationBarBackgroundColor": "#0b1220",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#0b1220",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

@@ -1,0 +1,51 @@
+<view class="page">
+  <view class="head">
+    <view class="subtitle">历史记录</view>
+    <view class="muted">按编号倒序</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="card empty">加载中…</view>
+  <view wx:elif="{{error}}" class="card empty">{{error}}</view>
+  <view wx:elif="{{items.length === 0}}" class="card empty">暂无历史记录</view>
+
+  <view wx:for="{{items}}" wx:key="code" class="card">
+    <view class="row between">
+      <view>
+        <view class="muted">结果编号</view>
+        <view class="value code">{{item.code}}</view>
+      </view>
+      <view class="muted">{{item.date}}</view>
+    </view>
+
+    <view class="numbers">
+      <view class="ball" wx:for="{{item.main}}" wx:for-item="num" wx:key="*this">{{num}}</view>
+      <view class="ball special">{{item.special}}</view>
+    </view>
+
+    <view class="divider"></view>
+
+    <view wx:if="{{item.records.length === 0}}" class="muted">当期没有记录</view>
+
+    <view wx:for="{{item.records}}" wx:for-item="record" wx:key="recordId" class="list-item">
+      <view class="row between">
+        <view class="row">
+          <view class="value">{{record.name}}</view>
+          <view class="tag">{{record.typeLabel}}</view>
+        </view>
+        <view class="value {{record.changeClass}}">{{record.changeText}}</view>
+      </view>
+      <view class="row between hit-line">
+        <view class="muted">{{record.matchesText}}</view>
+        <view class="muted">记录 ¥{{record.valueText}}</view>
+      </view>
+    </view>
+
+    <view class="row between total">
+      <view class="muted">合计</view>
+      <view class="row">
+        <view class="muted">记录 ¥{{item.summary.valueText}}</view>
+        <view class="value {{item.summary.changeClass}} summary-change">{{item.summary.changeText}}</view>
+      </view>
+    </view>
+  </view>
+</view>

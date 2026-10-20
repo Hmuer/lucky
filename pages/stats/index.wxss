@@ -1,0 +1,27 @@
+.head {
+  margin-bottom: 24rpx;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20rpx;
+}
+
+.stat-grid.compact {
+  margin-top: 18rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid #1f2a44;
+}
+
+.stat .value {
+  margin-top: 8rpx;
+  font-size: 32rpx;
+}
+
+.levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 16rpx;
+}

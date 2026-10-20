@@ -1,0 +1,129 @@
+<view class="page">
+  <view class="card">
+    <view class="seg">
+      <view
+        wx:for="{{typeOptions}}"
+        wx:key="key"
+        class="seg-item {{type === item.key ? 'on' : ''}}"
+        data-type="{{item.key}}"
+        bindtap="onType"
+      >
+        {{item.label}}
+      </view>
+    </view>
+    <view class="muted type-desc">{{typeDesc}}</view>
+  </view>
+
+  <view wx:if="{{type !== 'danTuo'}}" class="card">
+    <view class="row between">
+      <view class="title">主数字</view>
+      <view class="muted">已选 {{main.length}} / {{type === 'single' ? 6 : '6~20'}}</view>
+    </view>
+    <view class="grid">
+      <view
+        wx:for="{{mainCells}}"
+        wx:key="n"
+        class="num {{item.active ? 'active' : ''}}"
+        data-n="{{item.n}}"
+        bindtap="toggleMain"
+      >
+        {{item.n}}
+      </view>
+    </view>
+  </view>
+
+  <view wx:else class="card">
+    <view class="row between">
+      <view class="title">核心数字</view>
+      <view class="muted">已选 {{core.length}} / 5</view>
+    </view>
+    <view class="grid">
+      <view
+        wx:for="{{coreCells}}"
+        wx:key="n"
+        class="num {{item.active ? 'active' : ''}}"
+        data-n="{{item.n}}"
+        bindtap="toggleCore"
+      >
+        {{item.n}}
+      </view>
+    </view>
+
+    <view class="divider"></view>
+
+    <view class="row between">
+      <view class="title">扩展数字</view>
+      <view class="muted">已选 {{extra.length}}</view>
+    </view>
+    <view class="grid">
+      <view
+        wx:for="{{extraCells}}"
+        wx:key="n"
+        class="num {{item.active ? 'active' : ''}} {{item.disabled ? 'disabled' : ''}}"
+        data-n="{{item.n}}"
+        bindtap="toggleExtra"
+      >
+        {{item.n}}
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="row between">
+      <view class="title">特别数字</view>
+      <view class="muted">已选 {{special.length}} / 1</view>
+    </view>
+    <view class="grid special-grid">
+      <view
+        wx:for="{{specialCells}}"
+        wx:key="n"
+        class="num special {{item.active ? 'active' : ''}}"
+        data-n="{{item.n}}"
+        bindtap="toggleSpecial"
+      >
+        {{item.n}}
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="form-item">
+      <view class="label">名称</view>
+      <input class="input" value="{{name}}" maxlength="40" placeholder="给组合起个名字" bindinput="onName" />
+    </view>
+
+    <view class="form-item">
+      <view class="label">记录值（元 / 组）</view>
+      <input class="input" type="digit" value="{{unitValue}}" bindinput="onUnit" />
+    </view>
+
+    <view class="form-item">
+      <view class="label">起始编号</view>
+      <view class="seg">
+        <view class="seg-item {{startMode === 'next' ? 'on' : ''}}" data-mode="next" bindtap="setStartMode">下一期</view>
+        <view class="seg-item {{startMode === 'custom' ? 'on' : ''}}" data-mode="custom" bindtap="setStartMode">指定</view>
+        <view class="seg-item {{startMode === 'all' ? 'on' : ''}}" data-mode="all" bindtap="setStartMode">全部</view>
+      </view>
+      <input
+        wx:if="{{startMode === 'custom'}}"
+        class="input"
+        type="number"
+        maxlength="7"
+        value="{{startCode}}"
+        placeholder="7 位数字编号"
+        bindinput="onStartCode"
+      />
+    </view>
+
+    <view class="switch-row">
+      <view class="label">每次参与</view>
+      <switch checked="{{eachTime}}" color="#eab308" bindchange="onEachTime" />
+    </view>
+    <view class="switch-row">
+      <view class="label">启用</view>
+      <switch checked="{{enabled}}" color="#eab308" bindchange="onEnabled" />
+    </view>
+  </view>
+
+  <button class="btn save" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存</button>
+</view>

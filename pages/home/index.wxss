@@ -1,0 +1,24 @@
+.home-head {
+  margin-bottom: 24rpx;
+}
+
+.retry {
+  margin-top: 20rpx;
+}
+
+.code {
+  font-size: 40rpx;
+  letter-spacing: 2rpx;
+}
+
+.hit-line {
+  margin-top: 12rpx;
+}
+
+.change {
+  margin-left: 16rpx;
+}
+
+.btn-row {
+  margin-top: 12rpx;
+}

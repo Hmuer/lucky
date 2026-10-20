@@ -1,0 +1,48 @@
+<view class="page">
+  <view class="row between head">
+    <view>
+      <view class="subtitle">我的组合</view>
+      <view class="muted">共 {{records.length}} 个组合</view>
+    </view>
+    <view class="btn add" bindtap="add">新增</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="card empty">加载中…</view>
+  <view wx:elif="{{error}}" class="card empty">{{error}}</view>
+  <view wx:elif="{{records.length === 0}}" class="card empty">
+    还没有组合
+    <view class="btn add-empty" bindtap="add">创建第一个组合</view>
+  </view>
+
+  <view wx:for="{{records}}" wx:key="id" class="card">
+    <view class="row between">
+      <view class="row">
+        <view class="value">{{item.name}}</view>
+        <view class="tag">{{item.typeLabel}}</view>
+        <view wx:if="{{!item.enabled}}" class="tag">已停用</view>
+      </view>
+      <view class="muted">¥{{item.unitValue}} / 组</view>
+    </view>
+
+    <view class="numbers">
+      <block wx:if="{{item.type === 'danTuo'}}">
+        <view class="ball light" wx:for="{{item.core}}" wx:for-item="num" wx:key="*this">{{num}}</view>
+        <view class="ball" wx:for="{{item.extra}}" wx:for-item="num" wx:key="*this">{{num}}</view>
+      </block>
+      <block wx:else>
+        <view class="ball" wx:for="{{item.main}}" wx:for-item="num" wx:key="*this">{{num}}</view>
+      </block>
+      <view class="ball special">{{item.special}}</view>
+    </view>
+
+    <view class="row between meta">
+      <view class="muted">起始编号：{{item.startCode || '自动'}}</view>
+      <view class="muted">{{item.eachTime ? '每次参与' : '暂不参与'}}</view>
+    </view>
+
+    <view class="btn-row">
+      <view class="btn btn-ghost" data-id="{{item.id}}" bindtap="edit">编辑</view>
+      <view class="btn btn-ghost danger" data-id="{{item.id}}" bindtap="remove">删除</view>
+    </view>
+  </view>
+</view>

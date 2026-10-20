@@ -1,0 +1,88 @@
+<view class="page">
+  <view class="row between home-head">
+    <view>
+      <view class="subtitle">幸运数字</view>
+      <view class="muted">个人数字记录</view>
+    </view>
+    <view class="tag gold">最新结果</view>
+  </view>
+
+  <view wx:if="{{loading}}" class="card empty">加载中…</view>
+
+  <view wx:elif="{{error}}" class="card empty">
+    {{error}}
+    <view class="btn btn-ghost retry" bindtap="load">重试</view>
+  </view>
+
+  <view wx:elif="{{!latest}}" class="card empty">暂无结果</view>
+
+  <block wx:else>
+    <view class="card">
+      <view class="row between">
+        <view>
+          <view class="muted">结果编号</view>
+          <view class="value code">{{latest.code}}</view>
+        </view>
+        <view class="muted">{{latest.date}}</view>
+      </view>
+
+      <view class="numbers">
+        <view class="ball" wx:for="{{latest.main}}" wx:key="*this">{{item}}</view>
+        <view class="ball special">{{latest.special}}</view>
+      </view>
+
+      <view class="divider"></view>
+
+      <view class="row between">
+        <view>
+          <view class="muted">记录值</view>
+          <view class="value">¥{{latest.summary.valueText}}</view>
+        </view>
+        <view>
+          <view class="muted">变化</view>
+          <view class="value {{latest.summary.changeClass}}">{{latest.summary.changeText}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="row between">
+        <view class="title">本期记录</view>
+        <view class="muted">共 {{latest.records.length}} 条</view>
+      </view>
+
+      <view wx:if="{{latest.records.length === 0}}" class="empty">本期暂无记录</view>
+
+      <view wx:for="{{latest.records}}" wx:key="recordId" class="list-item">
+        <view class="row between">
+          <view class="row">
+            <view class="value">{{item.name}}</view>
+            <view class="tag">{{item.typeLabel}}</view>
+          </view>
+          <view class="muted">{{item.units}} 组</view>
+        </view>
+        <view class="row between hit-line">
+          <view class="muted">{{item.matchesText}}</view>
+          <view class="row">
+            <view class="muted">记录 ¥{{item.valueText}}</view>
+            <view class="value {{item.changeClass}} change">{{item.changeText}}</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="btn-row">
+        <view class="btn" bindtap="goRecords">我的组合</view>
+        <view class="btn btn-ghost" bindtap="goHistory">历史记录</view>
+      </view>
+      <view class="btn-row">
+        <view class="btn btn-ghost" bindtap="goStats">统计</view>
+        <view class="btn btn-ghost" bindtap="sync">同步结果</view>
+      </view>
+      <view class="btn-row">
+        <view class="btn btn-ghost" bindtap="notify">消息提醒</view>
+      </view>
+    </view>
+  </block>
+</view>
