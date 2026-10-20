@@ -21,6 +21,7 @@
 - [支持的玩法](#支持的玩法)
 - [奖级与金额规则](#奖级与金额规则)
 - [数据存储（TDSQL-C MySQL）](#数据存储tdsql-c-mysql)
+- [微信小程序多用户](#微信小程序多用户)
 - [同步与成本控制](#同步与成本控制)
 - [引擎单测](#引擎单测)
 - [常见问题](#常见问题)
@@ -38,9 +39,10 @@
 - **开奖记录**：每期开奖号 + 各守号命中明细 + 当期盈亏
 - **盈亏统计**：累计花费、累计中奖、回本率、走势曲线（Recharts）
 - **守号历史中奖统计**：按守号聚合 1~6 等各中几注、单期最高奖金、累计花费/中奖/盈亏
+- **微信小程序多用户**：微信登录、JWT 鉴权、按用户隔离守号/核对/统计、订阅消息推送；契约见 [docs/wx-api.md](docs/wx-api.md)
 - **自动同步**：
   - 首次启动自动回填中彩网当前可提供的全部历史期（2013 年至今，约 2,000 期）
-  - 进程内定时器仅在开奖日（周二/四/日）检查，未出结果自动重试
+  - 开奖日（周二/四/日）21:30 起每 10 分钟检查，拿到新期即停止并推送
   - 首页"立即同步开奖"按钮可手动触发增量同步
 
 ---
@@ -52,6 +54,7 @@
 | Node.js | 22.x（项目内 `.runtime`，由 `.node-version` 锁定） |
 | npm | ≥ 9（随项目内 Node 提供） |
 | 数据库 | MySQL 8.0（腾讯云 TDSQL-C），需可访问实例端口 |
+| 微信 | 小程序 AppID/Secret、订阅消息模板 ID，需在微信公众平台配置 |
 | 系统 | Linux / macOS / Windows (WSL) |
 | 网络 | 可访问 `cwl.gov.cn`、`nodejs.org`，以及 TDSQL-C 实例端口 |
 
@@ -116,13 +119,33 @@ cp .env.example .env.local
 DATABASE_URL=mysql://用户名:密码@主机:3306/lucky
 ```
 
+同时填写小程序相关变量（见 `.env.example`）：
+
+```text
+WX_APPID=...
+WX_APPSECRET=...
+JWT_SECRET=...            # openssl rand -hex 32
+CRON_SECRET=...           # openssl rand -hex 32
+WX_SUBSCRIBE_TEMPLATE_ID=...
+DEFAULT_USER_OPENID=__default__
+```
+
 如果 `lucky` 库还不存在，先在 TDSQL-C 执行：
 
 ```sql
 CREATE DATABASE lucky CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-首次访问时应用会自动建表。如果已有旧版 SQLite 数据，执行一次迁移：
+首次访问时应用会自动建表。已有数据库升级到多用户模型：
+
+```bash
+./scripts/npm.sh run migrate:multiuser
+```
+
+该脚本会创建 `users` / `subscriptions`，给 `bets` / `hit_records` 加 `user_id`，
+并把存量数据归属到 `DEFAULT_USER_OPENID`（缺省 `__default__`），不影响网页端数据。
+
+如果还有旧版 SQLite 数据，执行：
 
 ```bash
 ./scripts/npm.sh run migrate:mysql
@@ -351,30 +374,65 @@ curl --fail http://127.0.0.1:3000/api/health
 - **Git 安全**：`.env` / `.env.*` 均被忽略，仓库只保留 `.env.example` 占位
 - **建表**：首次访问时自动 `CREATE TABLE IF NOT EXISTS`
 - **表结构**：
+  - `users`：小程序用户（`openid` 唯一）
+  - `subscriptions`：用户订阅授权状态（`accepted`）
   - `draws`：开奖期（期号 / 日期 / 红蓝号 / 销售额 / 奖池 / 各级金额与注数）
-  - `bets`：守号（名称 / 类型 / payload JSON / 单注金额 / 购买开关）
-  - `hit_records`：每期每组守号汇总（花费 / 奖金 / 各级明细）
+  - `bets`：守号（`user_id` / 名称 / 类型 / payload JSON / 单注金额 / 购买开关）
+  - `hit_records`：每期每组守号汇总（`user_id` / 花费 / 奖金 / 各级明细）
   - `app_meta`：最后同步时间等元信息（`meta_key` / `value`）
-- **迁移**：`./scripts/npm.sh run migrate:mysql`（从 `data/ssq.db` 一次性导入，可重复执行并校验）
+- **多用户迁移**：`./scripts/npm.sh run migrate:multiuser`（建 users/subscriptions、加 user_id、回填默认用户）
+- **SQLite 迁移**：`./scripts/npm.sh run migrate:mysql`（从 `data/ssq.db` 一次性导入，可重复执行并校验）
 - **备份**：用 TDSQL-C 控制台备份，或 `mysqldump --single-transaction`
 - **本地 SQLite**：本部署已归档到 `/opt/lucky/backups/`，项目内 `data/` 已清空，应用不再写入
 - **重置**：`./start.sh reset` 只打印说明，不再删库；清空需手动执行 SQL
 
 ---
 
+## 微信小程序多用户
+
+- **登录**：`POST /api/wx/login`，用 `code` 调微信 `jscode2session`，首次登录自动创建 `users`，签发 30 天 JWT。
+- **鉴权**：`Authorization: Bearer <token>`；无效/过期返回 HTTP 401 `{ code: 40100, message: "未登录" }`。
+- **数据隔离**：`bets` / `hit_records` 均带 `user_id`，小程序接口按 JWT 的 `uid` 过滤；修改/删除守号会校验归属。
+- **网页端**：继续走原有 `/api/*`，使用 `DEFAULT_USER_OPENID` 对应的默认用户，保持单人模式，不显示其他小程序用户的数据。
+- **API 契约**：完整请求/响应见 [docs/wx-api.md](docs/wx-api.md)，包括金额单位、错误码和字段示例。
+
+新增环境变量：
+
+| 变量 | 说明 |
+|---|---|
+| `WX_APPID` | 小程序 AppID |
+| `WX_APPSECRET` | 小程序 AppSecret |
+| `JWT_SECRET` | JWT 签名密钥，至少 16 位随机串 |
+| `CRON_SECRET` | 外部定时器调用 `/api/wx/sync` 的校验密钥 |
+| `WX_SUBSCRIBE_TEMPLATE_ID` | 订阅消息模板 ID |
+| `DEFAULT_USER_OPENID` | 存量数据/网页端默认用户，缺省 `__default__` |
+| `WX_TEMPLATE_FIELD_*` | 可选，模板字段名，默认 `thing1` / `character_string2` / `amount3` |
+| `WX_SUBSCRIBE_PAGE` | 可选，点击订阅消息跳转的小程序页面 |
+| `WX_MINIPROGRAM_STATE` | 可选，`formal` / `trial` / `developer`，默认 `formal` |
+
+**订阅推送**：
+
+- `lib/wx/accessToken.ts` 全局缓存 access_token，提前 300 秒刷新，并发 single-flight，失败重试 1 次。
+- 同步到新期后，只给 `subscriptions.accepted = 1` 且本期有启用守号/命中记录的用户推送。
+- 推送字段至少包含期号、开奖号码、该用户盈亏；`43101` 静默跳过，`40001` 强制刷新 token 后重试一次。
+- 推送失败不会中断同步或其他用户。
+
+---
+
 ## 同步与成本控制
 
-目标：只在开奖后有新数据时写 MySQL，避免 30 分钟轮询和重复 upsert。
+目标：只在开奖后有新数据时写 MySQL，避免无意义轮询和重复 upsert。
 
 - **启动**：服务启动 5 秒后做一次 catch-up；页面首次 SSR 也会触发，内部去重
   - 库为空且未回填 → 回填约 2,000 期，一次性批量写入并结算
   - 库里有数据 → 只比较最新期号；无新期直接返回，**不写 draws / hit_records / app_meta**
 - **运行中**：不再 30 分钟轮询
-  - 仅在开奖日（周二/四/日）21:35 检查一次
-  - 结果未出时每 30 分钟重试，最多 3 次
+  - 开奖日（周二/四/日）北京时间 **21:30** 开始，每 **10 分钟**检查一次
+  - 拿到当期新数据即停止本轮轮询，并触发订阅消息推送
+  - 最多轮询 3 小时；超过后等下一次开奖或手动同步
   - 时区由 systemd 的 `TZ=Asia/Shanghai` 固定
 - **新期写入**：单事务 upsert 这一期 `draws` + 批量 upsert 该期 `hit_records`
-- **手动同步**：首页按钮 / `POST /api/sync`；无新期同样不写库
+- **手动同步**：首页按钮 / `POST /api/sync` / `POST /api/wx/sync`；无新期不写库，有新期会触发推送（补录指定期不推送）
 - **奖级修正**：官方事后修正金额时，用首页“补录指定期”触发 `syncOne`，只重写该期
 - **连接池**：最多 3 个连接，90 秒无查询自动关闭，便于 TDSQL-C 空闲时降成本
 - **停止服务**：主动关闭连接，避免数据库侧残留长时间 Sleep 连接
@@ -384,10 +442,48 @@ curl --fail http://127.0.0.1:3000/api/health
 > 但 Next 14 会把数据库原生模块一并打进 edge bundle 导致 SSR 500，
 > 因此已改为首页/健康检查懒启动，`src/instrumentation.ts` 已删除，不要重复添加。
 
+### 定时任务部署
+
+自托管（当前 systemd 部署）已经内置进程内定时器，无需额外 cron；如果希望把定时任务独立出来：
+
+```bash
+# 项目内调用脚本（读取 .env.local 的 CRON_SECRET）
+*/10 21-23 * * 2,4,0 /opt/lucky/lucky/scripts/wx-cron.sh >> /var/log/lucky-wx-cron.log 2>&1
+```
+
+脚本实际调用：
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/wx/sync \
+  -H "x-cron-secret: $CRON_SECRET" \
+  -H "content-type: application/json" -d '{}'
+```
+
+Serverless / Vercel 等平台无法稳定保留进程内定时器时，用平台 Cron 或 GitHub Actions 每 10 分钟调用一次
+`POST /api/wx/sync`，并带上 `x-cron-secret` 请求头（对应环境变量 `CRON_SECRET`）。北京时间 21:30–23:30
+对应 UTC 13:30–15:30，GitHub Actions 示例：
+
+```yaml
+on:
+  schedule:
+    - cron: "*/10 13-15 * * 2,4,0"
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST "${{ secrets.LUCKY_BASE_URL }}/api/wx/sync" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            -H "content-type: application/json" -d '{}'
+```
+
+`/api/wx/sync` 会复用同步逻辑，没有新期时不会写库；有新期时结算并推送。
+
 手动同步：
 
-- 首页右上角 **"立即同步开奖"** 按钮触发一次 `syncLatest()`（无新期不写库）
-- API：`POST /api/sync`（无 body）；补录指定期：`POST /api/sync` + `{"code":"2026120"}`
+- 首页右上角 **"立即同步开奖"** 按钮触发一次 `syncAndNotify()`（无新期不写库）
+- 网页 API：`POST /api/sync`（无 body，会推送）；补录指定期：`POST /api/sync` + `{"code":"2026120"}`（不推送）
+- 小程序/定时任务：`POST /api/wx/sync`（会推送）
 
 ---
 
@@ -419,6 +515,15 @@ A: 浮动奖级（1/2 等）的金额来自官方 `typemoney` 字段；个别期
 **Q: 为什么最早只有 2013 年的数据？**
 A: 中彩网当前接口只提供 2013 年至今的开奖记录（约 2,000 期）。更早的数据需要接入其它数据源，本工具未内置。
 
+**Q: 小程序登录失败怎么办？**
+A: 检查 `WX_APPID` / `WX_APPSECRET` 是否与小程序一致、服务器能否访问 `api.weixin.qq.com`、小程序是否配置了合法域名；服务端日志会记录微信 errcode/errmsg（不会记录 secret）。
+
+**Q: 为什么收不到订阅消息？**
+A: 需要用户完成 `wx.requestSubscribeMessage` 并调用 `/api/wx/report-subscription` 上报 `accepted=true`；同时配置正确的 `WX_SUBSCRIBE_TEMPLATE_ID` 与模板字段名。43101 表示用户未订阅或额度用尽，会被静默跳过。
+
+**Q: 网页端会看到小程序用户的数据吗？**
+A: 不会。网页端固定使用 `DEFAULT_USER_OPENID` 对应的默认用户；小程序接口按 JWT 的 uid 过滤。
+
 **Q: 怎么从旧 SQLite 迁移？**
 A: 如果还有 `data/ssq.db`，配置好 `.env.local` 后执行 `./scripts/npm.sh run migrate:mysql`。脚本会建库建表、批量导入并校验行数与金额，可重复执行。本部署的旧库已归档到 `/opt/lucky/backups/`，需要时可先解压恢复。
 
@@ -441,7 +546,7 @@ A: 不会上传到第三方。数据保存在你自己的 TDSQL-C 实例，应�
 A: 数据在 MySQL，`./start.sh reset` 只打印说明。请用 MySQL 客户端手动清理 `hit_records`、`bets`、`draws`、`app_meta`（谨慎操作，先备份）。
 
 **Q: 按量付费，怎么控制成本？**
-A: 只在开奖日 21:35 检查，未出结果最多重试 3 次；没有新期时完全不写库；新期只写该期并批量写命中；连接池 90 秒无查询自动关闭。需要彻底暂停数据库时，可在腾讯云控制台暂停实例，注意先停服务。
+A: 开奖日 21:30 起每 10 分钟检查一次，拿到新期即停止；没有新期时完全不写库；新期只写该期并批量写命中；连接池 90 秒无查询自动关闭。需要彻底暂停数据库时，可在腾讯云控制台暂停实例，注意先停服务。
 
 ---
 
@@ -449,24 +554,29 @@ A: 只在开奖日 21:35 检查，未出结果最多重试 3 次；没有新期�
 
 ```
 lucky/
-├── .env.example            # DATABASE_URL 模板（复制为 .env.local）
-├── .env.local              # 实际 MySQL 连接串（gitignore）
+├── .env.example            # 环境变量模板（DATABASE_URL / 微信 / JWT / CRON）
+├── .env.local              # 实际连接串与密钥（gitignore）
 ├── .node-version           # 固定的 Node 版本（22.23.2）
 ├── .runtime/               # 项目内 Node（bootstrap 生成，gitignore，约 200MB）
 ├── data/                   # 迁移临时目录（旧 SQLite 已归档到项目外）
+├── docs/
+│   └── wx-api.md           # 微信小程序 API 契约
 ├── logs/                   # 启动脚本的 PID/日志
 ├── scripts/
 │   ├── bootstrap-node.sh   # 下载/校验/解压 Node 到 .runtime
 │   ├── check-runtime.mjs   # npm install 前的 Node 主版本守卫
-│   ├── cron.mjs            # 可选：独立的外部轮询进程（默认不需要，定时同步已内置）
 │   ├── migrate-sqlite-to-mysql.ts  # 一次性迁移旧 SQLite 数据
+│   ├── migrate-multiuser.ts        # 多用户表结构 + 默认用户回填
+│   ├── test-wx.ts          # 微信登录/access_token/推送 mock 自测
+│   ├── wx-cron.sh          # 外部定时器调用 /api/wx/sync
 │   ├── npm.sh              # 用项目内 Node 运行项目内 npm
 │   └── run-next.mjs        # 优先用 .runtime/node 启动 Next
 ├── src/
 │   ├── app/                # Next.js App Router
-│   │   ├── api/            # REST API 路由
+│   │   ├── api/            # 网页端 REST API（保持原路径）
+│   │   │   ├── wx/         # 小程序 API（login/bets/current/history/stats/sync…）
 │   │   │   ├── health/     # 健康检查（部署用）
-│   │   │   ├── sync/       # 触发同步
+│   │   │   ├── sync/       # 网页端触发同步
 │   │   │   ├── draws/      # 查询开奖
 │   │   │   ├── bets/       # 守号增删改
 │   │   │   ├── hits/       # 命中记录
@@ -482,8 +592,9 @@ lucky/
 │   └── lib/
 │       ├── engine/         # 投注展开 + 命中结算 + 奖级表（纯函数，可单测）
 │       ├── crawler/        # 中彩网爬取
-│       ├── db/             # MySQL 数据访问（mysql2，连接池）
-│       └── sync/           # 守号↔引擎适配 + 同步执行（含 backfillHistory / startScheduler）
+│       ├── db/             # MySQL 数据访问（mysql2，连接池，user_id 隔离）
+│       ├── sync/           # 同步执行 + 21:30 定时器
+│       └── wx/             # 微信登录、JWT、access_token、订阅推送
 ├── start.sh                # 一键启动脚本（开发模式）
 ├── deploy.sh               # 一键重新部署（拉取/构建/重启/健康检查）
 ├── next.config.mjs         # Next.js 配置（mysql2 / better-sqlite3 走 Node 外部包）
