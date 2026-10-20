@@ -348,6 +348,7 @@ curl --fail http://127.0.0.1:3000/api/health
 
 - **引擎**：MySQL 8.0（腾讯云 TDSQL-C），库名 `lucky`
 - **连接**：`.env.local` 的 `DATABASE_URL`（已 gitignore，不会提交）
+- **Git 安全**：`.env` / `.env.*` 均被忽略，仓库只保留 `.env.example` 占位
 - **建表**：首次访问时自动 `CREATE TABLE IF NOT EXISTS`
 - **表结构**：
   - `draws`：开奖期（期号 / 日期 / 红蓝号 / 销售额 / 奖池 / 各级金额与注数）

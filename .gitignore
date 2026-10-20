@@ -8,4 +8,6 @@ out/
 data/
 logs/
 .DS_Store
-.env*.local
+.env
+.env.*
+!.env.example
