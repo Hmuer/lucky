@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { listBets, listHitsByBet } from "@/lib/db";
 
+// 数据来自本地 SQLite 且每 30 分钟同步一次，禁止构建期静态化
+export const dynamic = "force-dynamic";
+
 /**
  * 统计所有守号的历史中奖情况
  * 输出每个守号的 6 级奖命中次数 + 总花费/中奖/盈亏/参与的期数

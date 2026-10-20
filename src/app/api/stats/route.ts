@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { listAllHits, listDraws } from "@/lib/db";
 
+// 数据来自本地 SQLite 且每 30 分钟同步一次，禁止构建期静态化
+export const dynamic = "force-dynamic";
+
 /** 聚合统计：累计成本 / 累计中奖 / 盈亏 / 回本率 + 走势 */
 export async function GET() {
   const hits = listAllHits();
