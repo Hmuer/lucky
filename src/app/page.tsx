@@ -17,7 +17,10 @@ function typeLabel(t: string): string {
   return t;
 }
 
-// 用 globalThis 做模块级单例：避免多次 SSR 请求 / HMR 时重复启动定时器
+// 进程内唯一的同步启动入口。
+// 注意：不要改回 Next 的 instrumentationHook —— Next 14 会把 better-sqlite3
+// 一起打进 edge bundle，导致所有 SSR 页面 500。这里用 globalThis 做单例，
+// 保证多次 SSR / HMR 只触发一次。
 declare global {
   // eslint-disable-next-line no-var
   var __ssq_scheduler_started: boolean | undefined;
@@ -45,8 +48,7 @@ export default async function HomePage() {
   const bets = listBets(true);
   const lastSync = getMeta("last_sync_at");
 
-  // 第一次 SSR 时异步触发同步（不阻塞首屏）
-  // 用 await 让请求的尾段才执行，保证不阻塞首字节返回
+  // 第一次 SSR 时触发一次；同步在后台运行，不阻塞首屏
   void bootstrapSyncOnce();
 
   if (!latest) {
@@ -124,8 +126,6 @@ export default async function HomePage() {
             <tbody>
               {bets.map((b) => {
                 const hit = hits.find((h) => h.bet_id === b.id);
-                const cost = hit?.cost ?? b.buy_enabled ? b.unit_price : 0;
-                const win = hit?.win_amount ?? 0;
                 return (
                   <tr key={b.id}>
                     <td className="font-medium">{b.name}</td>
