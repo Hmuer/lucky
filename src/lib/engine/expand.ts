@@ -23,6 +23,7 @@ export function expandToTickets(bet: Bet): SingleBet[] {
     case "danTuo": {
       const need = 6 - bet.redDan.length;
       if (need <= 0) throw new Error("胆码数必须小于 6");
+      if (bet.redTuo.length < need) throw new Error(`红拖数不足：至少需要 ${need} 个`);
       const tuoSubsets = combinations([...bet.redTuo].sort((a, b) => a - b), need);
       const tickets: SingleBet[] = [];
       for (const tuo of tuoSubsets) {

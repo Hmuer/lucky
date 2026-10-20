@@ -4,7 +4,7 @@
  */
 
 import { settle } from "../settle";
-import { countUnits } from "../expand";
+import { countUnits, expandToTickets } from "../expand";
 import type { Bet, Draw } from "../types";
 
 function expect(name: string, cond: boolean, detail?: unknown) {
@@ -68,9 +68,9 @@ console.log("\n[4] 胆拖 - 边界抛错");
   } catch (e) {
     expect("红胆数 =6 抛错", true);
   }
-  // 红拖不够：need > 红拖数，应抛错
+  // 红拖不够：need=2 > 红拖数 1，应抛错
   try {
-    expandToTickets({ type: "danTuo", redDan: [1, 2, 3, 4, 5], redTuo: [6], blue: [1] });
+    expandToTickets({ type: "danTuo", redDan: [1, 2, 3, 4], redTuo: [6], blue: [1] });
     expect("红拖数不足 期望抛错", false);
   } catch (e) {
     expect("红拖数不足抛错", true);
