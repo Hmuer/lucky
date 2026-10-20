@@ -10,9 +10,9 @@ function fmtYuan(cents: number) {
 
 export default async function HistoryPage() {
   noStore();
-  const draws = listDraws(100);
-  const bets = listBets(false);
-  const hits = listAllHits();
+  const draws = await listDraws(100);
+  const bets = await listBets(false);
+  const hits = await listAllHits();
   const hitsByCode = new Map<string, typeof hits>();
   for (const h of hits) {
     if (!hitsByCode.has(h.draw_code)) hitsByCode.set(h.draw_code, [] as any);

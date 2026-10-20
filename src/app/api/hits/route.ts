@@ -5,15 +5,17 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   if (code) {
-    return NextResponse.json({
-      draw: getDraw(code),
-      hits: listHitsByDraw(code),
-      bets: listBets(false),
-    });
+    const [draw, hits, bets] = await Promise.all([
+      getDraw(code),
+      listHitsByDraw(code),
+      listBets(false),
+    ]);
+    return NextResponse.json({ draw, hits, bets });
   }
-  return NextResponse.json({
-    hits: listAllHits(),
-    bets: listBets(false),
-    draws: listDraws(200),
-  });
+  const [hits, bets, draws] = await Promise.all([
+    listAllHits(),
+    listBets(false),
+    listDraws(200),
+  ]);
+  return NextResponse.json({ hits, bets, draws });
 }

@@ -1,16 +1,29 @@
 /**
- * 自动同步：拉取最新开奖 → 入库 → 对所有启用守号做命中结算 → 写 hit_records
+ * 自动同步：拉取最新开奖 → 只在有新期时入库并结算
  *
- * 同步策略：
- * 1. 历史回填（一次性）：首次启动 / 库里为空时，分页拉取 2003 年至今所有期号入库。
- *    回填完成后写入 meta: history_backfilled=1，下次不再回填。
- * 2. 增量同步（定时）：进程内每 30 分钟拉取最近 20 期（增量，按 code 主键 upsert）。
- * 3. 命中结算：每条入库的开奖都会和所有 active=1 且 buy_enabled=1 的守号核对。
+ * 成本策略（TDSQL-C 按量付费）：
+ * 1. 不再每 30 分钟轮询；只在双色球开奖日（周二/四/日）21:35 检查，
+ *    结果未出时最多重试 3 次（每次间隔 30 分钟）。
+ * 2. 每次检查先比较库内最新期号；没有新期时只读 1 次、不写任何表。
+ * 3. 新期只写这一期：draws upsert + hit_records 批量 upsert，单事务提交。
+ * 4. 历史回填只在库为空时执行一次，批量写入。
  */
 
 import { fetchLatestDraws, parseDrawRow } from "../crawler/cwl";
-import { db, getDraw, listBets, listDraws, setMeta, upsertDraw, upsertHitRecord } from "../db";
-import type { DrawRow } from "../db";
+import {
+  deleteHitsByBet,
+  getBet,
+  getMeta,
+  latestDraw,
+  listBets,
+  listDraws,
+  listDrawsSince,
+  setMeta,
+  upsertDraws,
+  upsertHitRecords,
+  withTransaction,
+} from "../db";
+import type { BetRow, DrawRow } from "../db";
 import { settle } from "../engine/settle";
 import type { PrizeTier } from "../engine/types";
 import { rowToBet } from "./adapter";
@@ -20,13 +33,18 @@ export interface SyncReport {
   saved: number;
   hits: number;
   errors: string[];
+  skipped: boolean;
 }
 
-/**
- * 判断该守号是否在当前期参与核对
- * - 停用（active=0）：完全不参与
- * - 该期不购买（buy_enabled=0）：跳过当期
- */
+interface HitWrite {
+  draw_code: string;
+  bet_id: number;
+  units: number;
+  cost: number;
+  win_amount: number;
+  breakdown: string;
+}
+
 function shouldSettle(b: { active: number; buy_enabled: number }): boolean {
   if (!b.active) return false;
   if (!b.buy_enabled) return false;
@@ -44,288 +62,324 @@ function prizeAmountsFrom(drawRow: DrawRow): Partial<Record<PrizeTier, number>> 
   } as any;
 }
 
+function buildHit(drawRow: DrawRow, bet: BetRow): HitWrite | null {
+  if (!shouldSettle(bet)) return null;
+  if (bet.start_code && drawRow.code < bet.start_code) return null;
+  const draw = {
+    red: drawRow.red.split(",").map((x) => parseInt(x, 10)),
+    blue: parseInt(drawRow.blue, 10),
+  };
+  const result = settle(rowToBet(bet), draw, { prizeAmounts: prizeAmountsFrom(drawRow) });
+  return {
+    draw_code: drawRow.code,
+    bet_id: bet.id,
+    units: result.units,
+    cost: result.units * bet.unit_price,
+    win_amount: result.totalAmount * 100, // engine 用「元」，入库转分
+    breakdown: JSON.stringify(result.tierBreakdown),
+  };
+}
+
+function buildHits(drawRows: DrawRow[], bets: BetRow[]): HitWrite[] {
+  const out: HitWrite[] = [];
+  for (const drawRow of drawRows) {
+    for (const bet of bets) {
+      const hit = buildHit(drawRow, bet);
+      if (hit) out.push(hit);
+    }
+  }
+  return out;
+}
+
+/**
+ * 增量同步：只在发现新期时写入。
+ * 没有新期时不写 draws / hit_records / app_meta，直接返回 skipped。
+ */
 export async function syncLatest(): Promise<SyncReport> {
-  const report: SyncReport = { fetched: 0, saved: 0, hits: 0, errors: [] };
+  const report: SyncReport = { fetched: 0, saved: 0, hits: 0, errors: [], skipped: false };
+
   let rows;
   try {
-    rows = await fetchLatestDraws(20);
+    rows = await fetchLatestDraws(100);
   } catch (e: any) {
     report.errors.push(`fetch failed: ${e?.message ?? e}`);
     return report;
   }
   report.fetched = rows.length;
-  const bets = listBets(true);
+  if (!rows.length) return report;
 
-  for (const r of rows) {
-    try {
-      const parsed = parseDrawRow(r);
-      upsertDraw(parsed as any);
-      report.saved++;
-
-      const drawRow = getDraw(parsed.code) as DrawRow;
-      const draw = {
-        red: drawRow.red.split(",").map((x) => parseInt(x, 10)),
-        blue: parseInt(drawRow.blue, 10),
-      };
-      const prizeAmounts = prizeAmountsFrom(drawRow);
-
-      for (const b of bets) {
-        if (!shouldSettle(b)) continue;
-        // start_code 过滤：只在开始期及之后才结算
-        if (b.start_code && parsed.code < b.start_code) continue;
-        const bet = rowToBet(b);
-        const result = settle(bet, draw, { prizeAmounts });
-        const cost = result.units * b.unit_price;
-        upsertHitRecord({
-          draw_code: parsed.code,
-          bet_id: b.id,
-          units: result.units,
-          cost,
-          win_amount: result.totalAmount * 100, // engine 用「元」，入库转分
-          breakdown: JSON.stringify(result.tierBreakdown),
-        });
-        report.hits++;
-      }
-    } catch (e: any) {
-      report.errors.push(`draw ${r.code}: ${e?.message ?? e}`);
+  try {
+    const dbLatest = await latestDraw();
+    if (dbLatest && rows[0].code <= dbLatest.code) {
+      report.skipped = true;
+      return report;
     }
+
+    // rows 已按最新在前排序；只解析比库内最新期更新的期，按旧→新处理
+    const fresh = rows.filter((r) => !dbLatest || r.code > dbLatest.code).reverse();
+    const parsed: DrawRow[] = [];
+    for (const r of fresh) {
+      try {
+        parsed.push({ ...parseDrawRow(r), fetched_at: Date.now() } as DrawRow);
+      } catch (e: any) {
+        report.errors.push(`parse ${r.code}: ${e?.message ?? e}`);
+      }
+    }
+    if (!parsed.length) {
+      report.skipped = true;
+      return report;
+    }
+
+    const bets = await listBets(true);
+    const hits = buildHits(parsed, bets);
+
+    await withTransaction(async (conn) => {
+      await upsertDraws(parsed, conn);
+      await upsertHitRecords(hits, conn);
+    });
+
+    report.saved = parsed.length;
+    report.hits = hits.length;
+    await setMeta("last_sync_at", new Date().toISOString());
+    return report;
+  } catch (e: any) {
+    report.errors.push(e?.message ?? String(e));
+    return report;
   }
-  setMeta("last_sync_at", new Date().toISOString());
-  return report;
 }
 
+/** 手动补录/修复指定期：始终重新写这一期及其命中 */
 export async function syncOne(code: string): Promise<SyncReport> {
-  const report: SyncReport = { fetched: 0, saved: 0, hits: 0, errors: [] };
+  const report: SyncReport = { fetched: 0, saved: 0, hits: 0, errors: [], skipped: false };
   try {
-    const all = await fetchLatestDraws(50);
+    const all = await fetchLatestDraws(100);
     const r = all.find((x) => x.code === code);
     if (!r) {
       report.errors.push(`not found ${code}`);
       return report;
     }
     report.fetched = 1;
-    const parsed = parseDrawRow(r);
-    upsertDraw(parsed as any);
-    report.saved++;
-    const drawRow = getDraw(parsed.code) as DrawRow;
-    const draw = {
-      red: drawRow.red.split(",").map((x) => parseInt(x, 10)),
-      blue: parseInt(drawRow.blue, 10),
-    };
-    const prizeAmounts = prizeAmountsFrom(drawRow);
-    const bets = listBets(true);
-    for (const b of bets) {
-      if (!shouldSettle(b)) continue;
-      if (b.start_code && parsed.code < b.start_code) continue;
-      const bet = rowToBet(b);
-      const result = settle(bet, draw, { prizeAmounts });
-      upsertHitRecord({
-        draw_code: parsed.code,
-        bet_id: b.id,
-        units: result.units,
-        cost: result.units * b.unit_price,
-        win_amount: result.totalAmount * 100,
-        breakdown: JSON.stringify(result.tierBreakdown),
-      });
-      report.hits++;
-    }
-    setMeta("last_sync_at", new Date().toISOString());
+    const parsed = { ...parseDrawRow(r), fetched_at: Date.now() } as DrawRow;
+    const bets = await listBets(true);
+    const hits = buildHits([parsed], bets);
+
+    await withTransaction(async (conn) => {
+      await upsertDraws([parsed], conn);
+      await upsertHitRecords(hits, conn);
+    });
+
+    report.saved = 1;
+    report.hits = hits.length;
+    await setMeta("last_sync_at", new Date().toISOString());
   } catch (e: any) {
     report.errors.push(e?.message ?? String(e));
   }
   return report;
 }
 
-/** 启动时异步触发一次（best-effort）
- *  1. 库里为空：先做历史回填（拉全量历史期），回填完后同步一遍命中
- *  2. 库里已有数据：只做一次增量同步
- *  回填过的不再回填，标志写入 app_meta.history_backfilled
+/**
+ * 启动时触发一次（best-effort，模块级去重）：
+ * - 库为空且未回填过 → 拉全部历史期，批量入库并结算
+ * - 否则 → 做一次增量检查（无新期不写库）
  */
-export function ensureLatestSeed(): void {
-  void (async () => {
-    try {
-      const { getMeta } = await import("../db");
-      const backfilled = getMeta("history_backfilled") === "1";
-      const haveAny = listDraws(1).length > 0;
-      if (!backfilled && !haveAny) {
-        console.log("[sync] 历史回填开始...");
-        const r = await backfillHistory();
-        console.log(`[sync] 历史回填完成: 拉取 ${r.fetched} 期，入库 ${r.saved} 期`);
-        // 回填完成后立即和现有守号核对一次
-        await settleAllBets();
-      } else {
-        await syncLatest();
-      }
-    } catch (e) {
+let _seedPromise: Promise<void> | null = null;
+
+export function ensureLatestSeed(): Promise<void> {
+  if (!_seedPromise) {
+    _seedPromise = doEnsureLatestSeed().catch((e) => {
       console.error("[ensureLatestSeed] failed:", e);
-    }
-  })();
+      _seedPromise = null;
+    });
+  }
+  return _seedPromise;
+}
+
+async function doEnsureLatestSeed(): Promise<void> {
+  const [backfilled, recent] = await Promise.all([getMeta("history_backfilled"), listDraws(1)]);
+  if (backfilled !== "1" && recent.length === 0) {
+    console.log("[sync] 历史回填开始...");
+    const r = await backfillHistory();
+    console.log(`[sync] 历史回填完成: 拉取 ${r.fetched} 期，入库 ${r.saved} 期`);
+    await settleAllBets();
+  } else {
+    const r = await syncLatest();
+    console.log(
+      `[sync] 启动检查: 拉取 ${r.fetched} 期，新增 ${r.saved} 期，结算 ${r.hits} 条${r.skipped ? "（无新开奖）" : ""}`
+    );
+  }
 }
 
 /**
- * 历史回填：分页拉取所有期号入库
- * 中彩网接口不返回总数，但 pageSize=30 的接口连续翻页直到返回 < 30 即结束
- * 双色球 2003 年至今约 3600+ 期，按 30/页约 120 页
- * 单页失败不中断整体流程，跳过继续下一页
+ * 历史回填：中彩网接口当前忽略 pageSize，一次返回其可提供的全部期（约 2000 期）。
+ * 只为库内不存在的期写库，批量 upsert，避免逐期往返。
  */
 export async function backfillHistory(): Promise<{ fetched: number; saved: number; pages: number; errors: string[] }> {
   const report = { fetched: 0, saved: 0, pages: 0, errors: [] as string[] };
-  const pageSize = 30;
-  let page = 1;
-  const maxPages = 200; // 安全上限（约 6000 期，远超历史总数）
 
-  while (page <= maxPages) {
-    let rows;
-    try {
-      const url = `https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&pageNo=${page}&pageSize=${pageSize}`;
-      const headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36",
-        Referer: "https://www.cwl.gov.cn/",
-        Accept: "application/json, text/plain, */*",
-      };
-      const r = await fetch(url, { headers, cache: "no-store" });
-      if (!r.ok) {
-        report.errors.push(`page ${page} http ${r.status}`);
-        page++;
-        continue;
-      }
-      const j = (await r.json()) as { state: number; message?: string; result?: any[] };
-      if (j.state !== 0 || !j.result) {
-        report.errors.push(`page ${page} state=${j.state} ${j.message ?? ""}`);
-        page++;
-        continue;
-      }
-      rows = j.result;
-    } catch (e: any) {
-      report.errors.push(`page ${page}: ${e?.message ?? e}`);
-      page++;
-      continue;
-    }
-
-    report.pages++;
-    // 接口默认升序（旧→新），保留原序以便断点续拉时去重
-    for (const raw of rows) {
-      try {
-        const parsed = parseDrawRow(raw);
-        // 检查是否已存在，存在则跳过（支持断点续拉）
-        if (getDraw(parsed.code)) continue;
-        upsertDraw(parsed as any);
-        report.saved++;
-      } catch (e: any) {
-        report.errors.push(`page ${page} ${raw?.code}: ${e?.message ?? e}`);
-      }
-    }
-    report.fetched += rows.length;
-
-    if (rows.length < pageSize) break; // 最后一页
-    page++;
-
-    // 翻页间加一点间隔，避免被反爬
-    await sleep(150);
+  let rows;
+  try {
+    rows = await fetchLatestDraws(10000);
+  } catch (e: any) {
+    report.errors.push(`fetch failed: ${e?.message ?? e}`);
+    return report;
   }
 
-  setMeta("history_backfilled", "1");
-  setMeta("last_backfill_at", new Date().toISOString());
+  report.pages = 1;
+  report.fetched = rows.length;
+
+  const existing = new Set((await listDraws(10000)).map((d) => d.code));
+  const parsed: DrawRow[] = [];
+  for (const r of rows) {
+    if (existing.has(r.code)) continue;
+    try {
+      parsed.push({ ...parseDrawRow(r), fetched_at: Date.now() } as DrawRow);
+    } catch (e: any) {
+      report.errors.push(`${r?.code}: ${e?.message ?? e}`);
+    }
+  }
+
+  if (parsed.length) {
+    await withTransaction(async (conn) => {
+      await upsertDraws(parsed, conn);
+    });
+    report.saved = parsed.length;
+  }
+
+  // 有数据且无解析错误才标记完成；失败时下次启动会重试（upsert 幂等）
+  if (report.fetched > 0 && report.errors.length === 0) {
+    await setMeta("history_backfilled", "1");
+    await setMeta("last_backfill_at", new Date().toISOString());
+    await setMeta("last_sync_at", new Date().toISOString());
+  }
   return report;
 }
 
-function sleep(ms: number) {
-  return new Promise<void>((r) => setTimeout(r, ms));
+/** 对所有启用守号按当前 start_code 重新结算库内开奖（回填后/手动修复用） */
+export async function settleAllBets(): Promise<{ bet: number; recalc: number }> {
+  const bets = await listBets(true);
+  let totalRecalc = 0;
+  for (const b of bets) {
+    const r = await resyncBet(b.id);
+    totalRecalc += r.recalc;
+  }
+  return { bet: bets.length, recalc: totalRecalc };
 }
 
 /**
- * 对所有启用守号、按当前 start_code 重新结算库内全部历史开奖
- * 用于：历史回填后批量核对、用户改 start_code 后追溯
+ * 对单个守号按当前 start_code 重新结算：
+ * 删除旧 hit_records → 拉取 start_code 之后的期 → 批量写入（单事务）。
+ * 用于新增守号、修改 start_code、手动修复。
  */
-export function settleAllBets(): Promise<{ bet: number; recalc: number }> {
-  return Promise.resolve().then(() => {
-    const bets = listBets(true); // 只处理 active=1
-    let totalRecalc = 0;
-    for (const b of bets) {
-      const r = resyncBet(b.id);
-      totalRecalc += r.recalc;
-    }
-    return { bet: bets.length, recalc: totalRecalc };
+export async function resyncBet(betId: number): Promise<{ recalc: number; deleted: number }> {
+  const bet = await getBet(betId);
+  if (!bet) throw new Error(`bet ${betId} not found`);
+
+  const draws = shouldSettle(bet) ? await listDrawsSince(bet.start_code) : [];
+  const writes: HitWrite[] = [];
+  for (const drawRow of draws) {
+    const hit = buildHit(drawRow, bet);
+    if (hit) writes.push(hit);
+  }
+
+  return withTransaction(async (conn) => {
+    const deleted = await deleteHitsByBet(betId, conn);
+    await upsertHitRecords(writes, conn);
+    return { recalc: writes.length, deleted };
   });
 }
 
-/**
- * 进程内定时器：每 30 分钟拉一次最新开奖
- * 模块级单例，多次 import 只启动一次
- */
-let _schedulerStarted = false;
-const SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 分钟
-
-export function startScheduler(): void {
-  if (_schedulerStarted) return;
-  _schedulerStarted = true;
-  console.log(`[sync] 定时器已启动：每 ${SYNC_INTERVAL_MS / 60000} 分钟拉取一次最新开奖`);
-
-  // 延迟 5 秒首次启动，避免和 ensureLatestSeed 撞车
-  setTimeout(() => {
-    void tick();
-    setInterval(() => {
-      void tick();
-    }, SYNC_INTERVAL_MS);
-  }, 5000);
-}
-
-async function tick(): Promise<void> {
-  try {
-    const r = await syncLatest();
-    if (r.saved > 0) {
-      console.log(`[sync] 定时同步完成: 拉取 ${r.fetched} 期，新增/更新 ${r.saved} 期`);
-    } else {
-      console.log(`[sync] 定时同步完成: 无新数据`);
-    }
-  } catch (e: any) {
-    console.error("[sync] 定时同步失败:", e?.message ?? e);
-  }
-}
-
-/**
- * 对单个守号按当前 start_code 重新结算所有已入库的开奖
- * 用于：新增守号（默认 start_code = 当前最新期，追溯从该期开始）、
- *       用户修改了 start_code 想追溯历史
- */
-export function resyncBet(betId: number): { recalc: number; deleted: number } {
-  const bet = db().prepare(`SELECT * FROM bets WHERE id = ?`).get(betId) as any;
-  if (!bet) throw new Error(`bet ${betId} not found`);
-  // 先清掉该守号的全部历史记录，再按 start_code 重算
-  const del = db().prepare(`DELETE FROM hit_records WHERE bet_id = ?`).run(betId);
-  const draws = listDraws(10000);
-  let recalc = 0;
-  const startCode = bet.start_code ?? "0000000";
-  for (const drawRow of draws) {
-    if (drawRow.code < startCode) continue;
-    if (!shouldSettle(bet)) continue;
-    const draw = {
-      red: drawRow.red.split(",").map((x) => parseInt(x, 10)),
-      blue: parseInt(drawRow.blue, 10),
-    };
-    const prizeAmounts = prizeAmountsFrom(drawRow);
-    const engineBet = rowToBet(bet);
-    const result = settle(engineBet, draw, { prizeAmounts });
-    upsertHitRecord({
-      draw_code: drawRow.code,
-      bet_id: betId,
-      units: result.units,
-      cost: result.units * bet.unit_price,
-      win_amount: result.totalAmount * 100,
-      breakdown: JSON.stringify(result.tierBreakdown),
-    });
-    recalc++;
-  }
-  return { recalc, deleted: del.changes };
-}
-
 /** 计算下一个预期期号 = 最新期号 + 1（按年递增 + 期内顺序） */
-export function nextDrawCode(): string | null {
-  const latest = db().prepare(`SELECT code FROM draws ORDER BY date DESC, code DESC LIMIT 1`).get() as { code: string } | undefined;
+export async function nextDrawCode(): Promise<string | null> {
+  const latest = await latestDraw();
   if (!latest) return null;
   const year = parseInt(latest.code.slice(0, 4), 10);
   const seq = parseInt(latest.code.slice(4), 10);
-  // 年内最大期号双色球约 156
   if (seq >= 156) return `${year + 1}001`;
   return `${year}${String(seq + 1).padStart(3, "0")}`;
+}
+
+/* ====== 定时器：只在开奖日检查，避免无意义的 30 分钟轮询 ====== */
+
+const DRAW_WEEKDAYS = new Set([0, 2, 4]); // 周日、周二、周四
+const DRAW_HOUR = 21;
+const DRAW_MINUTE = 35;
+const RETRY_DELAY_MS = 30 * 60 * 1000;
+const MAX_RETRIES = 3;
+
+let _schedulerStarted = false;
+let _tickRunning = false;
+let _retryCount = 0;
+let _nextTimer: ReturnType<typeof setTimeout> | null = null;
+
+function nextDrawAt(from: Date): Date {
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(from);
+    d.setDate(from.getDate() + i);
+    d.setHours(DRAW_HOUR, DRAW_MINUTE, 0, 0);
+    if (d.getTime() > from.getTime() && DRAW_WEEKDAYS.has(d.getDay())) return d;
+  }
+  throw new Error("无法计算下次开奖时间");
+}
+
+function scheduleAt(date: Date, reason: "draw" | "retry"): void {
+  if (_nextTimer) clearTimeout(_nextTimer);
+  const delay = Math.max(0, date.getTime() - Date.now());
+  console.log(
+    `[sync] 下次检查: ${date.toLocaleString("zh-CN", { hour12: false })} (${reason})`
+  );
+  _nextTimer = setTimeout(() => {
+    void tick(reason);
+  }, delay);
+  _nextTimer.unref?.();
+}
+
+async function tick(reason: "draw" | "retry"): Promise<void> {
+  if (_tickRunning) return;
+  _tickRunning = true;
+  try {
+    const r = await syncLatest();
+    if (r.errors.length) {
+      console.error("[sync] 检查有错误:", r.errors.join("; "));
+    }
+    console.log(
+      `[sync] 检查完成: 拉取 ${r.fetched} 期，新增 ${r.saved} 期，结算 ${r.hits} 条${r.skipped ? "（无新开奖）" : ""}`
+    );
+
+    if ((reason === "draw" || reason === "retry") && r.saved === 0 && _retryCount < MAX_RETRIES) {
+      _retryCount++;
+      scheduleAt(new Date(Date.now() + RETRY_DELAY_MS), "retry");
+      return;
+    }
+
+    _retryCount = 0;
+    scheduleAt(nextDrawAt(new Date(Date.now() + 1000)), "draw");
+  } catch (e: any) {
+    console.error("[sync] 检查失败:", e?.message ?? e);
+    if (_retryCount < MAX_RETRIES) {
+      _retryCount++;
+      scheduleAt(new Date(Date.now() + RETRY_DELAY_MS), "retry");
+    } else {
+      _retryCount = 0;
+      scheduleAt(nextDrawAt(new Date(Date.now() + 1000)), "draw");
+    }
+  } finally {
+    _tickRunning = false;
+  }
+}
+
+/**
+ * 启动定时器：
+ * - 启动 5 秒后做一次 catch-up（页面首次 SSR 也会触发，内部去重）
+ * - 之后只在开奖日 21:35 检查；若结果未出，30 分钟后重试，最多 2 次
+ */
+export function startScheduler(): void {
+  if (_schedulerStarted) return;
+  _schedulerStarted = true;
+  console.log("[sync] 定时器已启动：仅开奖日（周二/四/日）21:35 检查，未出结果最多重试 3 次");
+
+  setTimeout(() => {
+    void ensureLatestSeed().catch(() => {});
+  }, 5000).unref?.();
+
+  scheduleAt(nextDrawAt(new Date(Date.now() + 1000)), "draw");
 }

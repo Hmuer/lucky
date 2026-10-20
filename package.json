@@ -9,6 +9,7 @@
     "build": "node scripts/run-next.mjs build",
     "start": "node scripts/run-next.mjs start -H 127.0.0.1 -p 3000",
     "test:engine": "tsx src/lib/engine/__tests__/run.ts",
+    "migrate:mysql": "tsx scripts/migrate-sqlite-to-mysql.ts",
     "preinstall": "node scripts/check-runtime.mjs"
   },
   "engines": {
@@ -17,6 +18,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
+    "mysql2": "^3.24.6",
     "next": "14.2.18",
     "react": "18.3.1",
     "react-dom": "18.3.1",

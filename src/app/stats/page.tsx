@@ -24,10 +24,10 @@ interface BetStatRow {
   tier_counts: TierCounts;
 }
 
-function buildBetStats(): BetStatRow[] {
-  const bets = listBets(true); // 只统计启用守号
-  return bets.map((b) => {
-    const hits = listHitsByBet(b.id!);
+async function buildBetStats(): Promise<BetStatRow[]> {
+  const bets = await listBets(true); // 只统计启用守号
+  return Promise.all(bets.map(async (b) => {
+    const hits = await listHitsByBet(b.id!);
     const tier_counts: TierCounts = { ...ZERO_TIER };
     let cost = 0;
     let win = 0;
@@ -63,13 +63,16 @@ function buildBetStats(): BetStatRow[] {
       best_win: bestWin,
       tier_counts,
     };
-  });
+  }));
 }
 
 export default async function StatsPage() {
   noStore();
-  const hits = listAllHits();
-  const draws = listDraws(500);
+  const [hits, draws, betStatsRaw] = await Promise.all([
+    listAllHits(),
+    listDraws(500),
+    buildBetStats(),
+  ]);
   const drawMap = new Map(draws.map((d) => [d.code, d]));
   const orderedCodes = Array.from(new Set(hits.map((h) => h.draw_code)))
     .sort((a, b) => (drawMap.get(a)?.date ?? a).localeCompare(drawMap.get(b)?.date ?? b));
@@ -86,7 +89,7 @@ export default async function StatsPage() {
     series.push({ code, date: draw?.date ?? code, cost, win, cumCost, cumWin, profit: cumWin - cumCost });
   }
 
-  const betStats = buildBetStats().sort((a, b) => {
+  const betStats = betStatsRaw.sort((a, b) => {
     // 按最高奖级命中次数降序，再按盈亏降序
     const tierRankA = a.tier_counts[1] * 1e6 + a.tier_counts[2] * 1e4 + a.tier_counts[3] * 100 + a.tier_counts[4];
     const tierRankB = b.tier_counts[1] * 1e6 + b.tier_counts[2] * 1e4 + b.tier_counts[3] * 100 + b.tier_counts[4];

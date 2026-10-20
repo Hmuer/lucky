@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { listBets, listHitsByBet } from "@/lib/db";
 
-// 数据来自本地 SQLite 且每 30 分钟同步一次，禁止构建期静态化
+// 数据来自 MySQL，禁止构建期静态化
 export const dynamic = "force-dynamic";
 
 /**
@@ -9,9 +9,9 @@ export const dynamic = "force-dynamic";
  * 输出每个守号的 6 级奖命中次数 + 总花费/中奖/盈亏/参与的期数
  */
 export async function GET() {
-  const bets = listBets(false);
-  const result = bets.map((b) => {
-    const hits = listHitsByBet(b.id!);
+  const bets = await listBets(false);
+  const result = await Promise.all(bets.map(async (b) => {
+    const hits = await listHitsByBet(b.id!);
     // 累加 6 级奖命中注数
     const tierCounts: Record<1 | 2 | 3 | 4 | 5 | 6, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
     let cost = 0;
@@ -52,6 +52,6 @@ export async function GET() {
       best_win: bestWin,           // 分（单期最大奖金）
       tier_counts: tierCounts,     // 1~6 等各中几注
     };
-  });
+  }));
   return NextResponse.json({ stats: result });
 }

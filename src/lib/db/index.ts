@@ -1,93 +1,228 @@
 /**
- * SQLite 单例 + 建表 + 仓库函数
- * 表：
- *   - draws：开奖期
- *   - bets：守号（支持 single/complex/danTuo，存为 JSON）
- *   - hit_records：每期每组守号的命中汇总
- *   - app_meta：key/value 元信息（最后拉取时间等）
+ * MySQL / TDSQL-C 数据访问层（替代原 better-sqlite3）
+ *
+ * 设计要点：
+ * - 连接串来自 DATABASE_URL（.env.local，勿提交）
+ * - 小连接池 + 90 秒无查询自动关闭，便于 TDSQL-C 空闲时降成本
+ * - 表结构首次访问时 CREATE TABLE IF NOT EXISTS
+ * - 所有写操作使用参数化 SQL；批量 upsert 减少往返
  */
 
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import path from "node:path";
+import { createPool, type Pool, type PoolConnection, type ResultSetHeader } from "mysql2/promise";
 
-const DATA_DIR = path.resolve(process.cwd(), "data");
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-const DB_PATH = path.join(DATA_DIR, "ssq.db");
+let _pool: Pool | null = null;
+let _schemaPromise: Promise<void> | null = null;
+let _idleTimer: ReturnType<typeof setTimeout> | null = null;
+let _active = 0;
 
-let _db: Database.Database | null = null;
+/** 无查询多久后主动关闭连接池（毫秒）。按量计费场景下让数据库更容易空闲。 */
+const IDLE_CLOSE_MS = 90_000;
 
-export function db(): Database.Database {
-  if (_db) return _db;
-  _db = new Database(DB_PATH);
-  _db.pragma("journal_mode = WAL");
-  _db.pragma("foreign_keys = ON");
-  initSchema(_db);
-  return _db;
+function poolOptions() {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) {
+    throw new Error("缺少 DATABASE_URL，请在 .env.local 配置 MySQL 连接串");
+  }
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("DATABASE_URL 格式不正确，应为 mysql://user:pass@host:port/database");
+  }
+
+  const database = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+  if (!database) throw new Error("DATABASE_URL 缺少数据库名");
+
+  return {
+    host: url.hostname,
+    port: Number(url.port || 3306),
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database,
+    charset: "utf8mb4",
+    waitForConnections: true,
+    connectionLimit: 3,
+    maxIdle: 1,
+    idleTimeout: 60_000,
+    queueLimit: 0,
+    dateStrings: true,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 0,
+    connectTimeout: 10_000,
+  };
 }
 
-function initSchema(d: Database.Database) {
-  d.exec(`
-    CREATE TABLE IF NOT EXISTS draws (
-      code TEXT PRIMARY KEY,
-      date TEXT NOT NULL,           -- YYYY-MM-DD
-      week TEXT,                    -- 二/四/日
-      red TEXT NOT NULL,            -- 逗号分隔
-      blue TEXT NOT NULL,           -- 单值
-      sales INTEGER,
-      poolmoney INTEGER,
-      prize1_amount INTEGER, prize1_count INTEGER,
-      prize2_amount INTEGER, prize2_count INTEGER,
-      prize3_amount INTEGER, prize3_count INTEGER,
-      prize4_amount INTEGER, prize4_count INTEGER,
-      prize5_amount INTEGER, prize5_count INTEGER,
-      prize6_amount INTEGER, prize6_count INTEGER,
-      content TEXT,
-      details_link TEXT,
-      fetched_at INTEGER NOT NULL,
-      UNIQUE(code)
-    );
-    CREATE INDEX IF NOT EXISTS idx_draws_date ON draws(date);
+export function getPool(): Pool {
+  if (!_pool) {
+    _pool = createPool(poolOptions());
+    hookShutdown();
+  }
+  return _pool;
+}
 
-    CREATE TABLE IF NOT EXISTS bets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,           -- single/complex/danTuo
-      payload TEXT NOT NULL,        -- JSON: { red/redDan/redTuo/blue }
-      unit_price INTEGER NOT NULL DEFAULT 200, -- 单注金额（分），默认 2 元
-      buy_enabled INTEGER NOT NULL DEFAULT 1,  -- 该期是否购买
-      active INTEGER NOT NULL DEFAULT 1,
-      start_code TEXT,              -- 从哪期开始守（NULL = 全部；字符串 = 该期及之后才结算）
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
+let _shutdownHooked = false;
+function hookShutdown(): void {
+  if (_shutdownHooked) return;
+  _shutdownHooked = true;
+  // 服务重启/停止时主动关连接，避免在 TDSQL-C 侧留下长时间 Sleep 连接
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => {
+      void closePool();
+    });
+  }
+}
 
-    CREATE TABLE IF NOT EXISTS hit_records (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      draw_code TEXT NOT NULL,
-      bet_id INTEGER NOT NULL,
-      units INTEGER NOT NULL,
-      cost INTEGER NOT NULL,            -- 花费（分）
-      win_amount INTEGER NOT NULL,      -- 奖金（分）
-      breakdown TEXT NOT NULL,          -- JSON: tierBreakdown
-      created_at INTEGER NOT NULL,
-      UNIQUE(draw_code, bet_id),
-      FOREIGN KEY(draw_code) REFERENCES draws(code),
-      FOREIGN KEY(bet_id) REFERENCES bets(id) ON DELETE CASCADE
-    );
+function touchIdle(): void {
+  if (_idleTimer) clearTimeout(_idleTimer);
+  _idleTimer = setTimeout(() => {
+    if (_active > 0) {
+      touchIdle();
+      return;
+    }
+    const p = _pool;
+    _pool = null;
+    if (p) void p.end().catch(() => {});
+  }, IDLE_CLOSE_MS);
+  _idleTimer.unref?.();
+}
 
-    CREATE TABLE IF NOT EXISTS app_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-  `);
+async function select<T>(sql: string, params: any[] = []): Promise<T[]> {
+  _active++;
+  touchIdle();
+  try {
+    const [result] = await getPool().query(sql, params);
+    return result as unknown as T[];
+  } finally {
+    _active--;
+    touchIdle();
+  }
+}
 
-  // 兼容老库：bets 表缺 start_code 列则补上
-  // 注意：必须在 CREATE TABLE 之后做，否则新库上 bets 还不存在会抛错
-  const cols = d.prepare(`PRAGMA table_info(bets)`).all() as { name: string }[];
-  if (cols.length > 0 && !cols.some((c) => c.name === "start_code")) {
-    d.exec(`ALTER TABLE bets ADD COLUMN start_code TEXT`);
+async function execute(sql: string, params: any[] = []): Promise<ResultSetHeader> {
+  _active++;
+  touchIdle();
+  try {
+    const [result] = await getPool().execute(sql, params);
+    return result as ResultSetHeader;
+  } finally {
+    _active--;
+    touchIdle();
+  }
+}
+
+async function raw(sql: string): Promise<void> {
+  _active++;
+  touchIdle();
+  try {
+    await getPool().query(sql);
+  } finally {
+    _active--;
+    touchIdle();
+  }
+}
+
+const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS draws (
+    code VARCHAR(16) NOT NULL,
+    \`date\` DATE NOT NULL,
+    week VARCHAR(8) NULL,
+    red VARCHAR(32) NOT NULL,
+    blue VARCHAR(8) NOT NULL,
+    sales BIGINT NULL,
+    poolmoney BIGINT NULL,
+    prize1_amount BIGINT NULL, prize1_count INT NULL,
+    prize2_amount BIGINT NULL, prize2_count INT NULL,
+    prize3_amount BIGINT NULL, prize3_count INT NULL,
+    prize4_amount BIGINT NULL, prize4_count INT NULL,
+    prize5_amount BIGINT NULL, prize5_count INT NULL,
+    prize6_amount BIGINT NULL, prize6_count INT NULL,
+    content TEXT NULL,
+    details_link VARCHAR(255) NULL,
+    fetched_at BIGINT NOT NULL,
+    PRIMARY KEY (code),
+    KEY idx_draws_date (\`date\`)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS bets (
+    id INT NOT NULL AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(16) NOT NULL,
+    payload TEXT NOT NULL,
+    unit_price INT NOT NULL DEFAULT 200,
+    buy_enabled TINYINT NOT NULL DEFAULT 1,
+    active TINYINT NOT NULL DEFAULT 1,
+    start_code VARCHAR(16) NULL,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    PRIMARY KEY (id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS hit_records (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    draw_code VARCHAR(16) NOT NULL,
+    bet_id INT NOT NULL,
+    units INT NOT NULL,
+    cost BIGINT NOT NULL,
+    win_amount BIGINT NOT NULL,
+    breakdown TEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_hit_draw_bet (draw_code, bet_id),
+    KEY idx_hit_bet (bet_id),
+    CONSTRAINT fk_hit_draw FOREIGN KEY (draw_code) REFERENCES draws(code) ON DELETE CASCADE,
+    CONSTRAINT fk_hit_bet FOREIGN KEY (bet_id) REFERENCES bets(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS app_meta (
+    meta_key VARCHAR(64) NOT NULL,
+    value TEXT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    PRIMARY KEY (meta_key)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+];
+
+export async function ensureSchema(): Promise<void> {
+  if (!_schemaPromise) {
+    _schemaPromise = (async () => {
+      for (const sql of SCHEMA) await raw(sql);
+    })().catch((e) => {
+      _schemaPromise = null;
+      throw e;
+    });
+  }
+  await _schemaPromise;
+}
+
+export async function closePool(): Promise<void> {
+  if (_idleTimer) {
+    clearTimeout(_idleTimer);
+    _idleTimer = null;
+  }
+  const p = _pool;
+  _pool = null;
+  if (p) await p.end().catch(() => {});
+}
+
+export async function withTransaction<T>(fn: (conn: PoolConnection) => Promise<T>): Promise<T> {
+  await ensureSchema();
+  _active++;
+  touchIdle();
+  let conn: PoolConnection | null = null;
+  try {
+    conn = await getPool().getConnection();
+    await conn.beginTransaction();
+    const result = await fn(conn);
+    await conn.commit();
+    return result;
+  } catch (e) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    throw e;
+  } finally {
+    if (conn) conn.release();
+    _active--;
+    touchIdle();
   }
 }
 
@@ -118,42 +253,93 @@ export interface DrawRow {
   fetched_at: number;
 }
 
-export function upsertDraw(d: Omit<DrawRow, "fetched_at">): void {
-  const stmt = db().prepare(
-    `INSERT INTO draws (code,date,week,red,blue,sales,poolmoney,
-       prize1_amount,prize1_count,prize2_amount,prize2_count,prize3_amount,prize3_count,
-       prize4_amount,prize4_count,prize5_amount,prize5_count,prize6_amount,prize6_count,
-       content,details_link,fetched_at)
-     VALUES (@code,@date,@week,@red,@blue,@sales,@poolmoney,
-       @prize1_amount,@prize1_count,@prize2_amount,@prize2_count,@prize3_amount,@prize3_count,
-       @prize4_amount,@prize4_count,@prize5_amount,@prize5_count,@prize6_amount,@prize6_count,
-       @content,@details_link,@fetched_at)
-     ON CONFLICT(code) DO UPDATE SET
-       date=excluded.date, week=excluded.week, red=excluded.red, blue=excluded.blue,
-       sales=excluded.sales, poolmoney=excluded.poolmoney,
-       prize1_amount=excluded.prize1_amount, prize1_count=excluded.prize1_count,
-       prize2_amount=excluded.prize2_amount, prize2_count=excluded.prize2_count,
-       prize3_amount=excluded.prize3_amount, prize3_count=excluded.prize3_count,
-       prize4_amount=excluded.prize4_amount, prize4_count=excluded.prize4_count,
-       prize5_amount=excluded.prize5_amount, prize5_count=excluded.prize5_count,
-       prize6_amount=excluded.prize6_amount, prize6_count=excluded.prize6_count,
-       content=excluded.content, details_link=excluded.details_link, fetched_at=excluded.fetched_at`
-  );
-  stmt.run({ ...d, fetched_at: Date.now() });
+const DRAW_COLUMNS =
+  "code,`date`,week,red,blue,sales,poolmoney," +
+  "prize1_amount,prize1_count,prize2_amount,prize2_count,prize3_amount,prize3_count," +
+  "prize4_amount,prize4_count,prize5_amount,prize5_count,prize6_amount,prize6_count," +
+  "content,details_link,fetched_at";
+const DRAW_ROW_PLACEHOLDERS = "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+const DRAW_UPDATE =
+  "`date`=VALUES(`date`),week=VALUES(week),red=VALUES(red),blue=VALUES(blue)," +
+  "sales=VALUES(sales),poolmoney=VALUES(poolmoney)," +
+  "prize1_amount=VALUES(prize1_amount),prize1_count=VALUES(prize1_count)," +
+  "prize2_amount=VALUES(prize2_amount),prize2_count=VALUES(prize2_count)," +
+  "prize3_amount=VALUES(prize3_amount),prize3_count=VALUES(prize3_count)," +
+  "prize4_amount=VALUES(prize4_amount),prize4_count=VALUES(prize4_count)," +
+  "prize5_amount=VALUES(prize5_amount),prize5_count=VALUES(prize5_count)," +
+  "prize6_amount=VALUES(prize6_amount),prize6_count=VALUES(prize6_count)," +
+  "content=VALUES(content),details_link=VALUES(details_link),fetched_at=VALUES(fetched_at)";
+
+function drawValues(d: DrawRow): any[] {
+  return [
+    d.code,
+    d.date,
+    d.week,
+    d.red,
+    d.blue,
+    d.sales,
+    d.poolmoney,
+    d.prize1_amount,
+    d.prize1_count,
+    d.prize2_amount,
+    d.prize2_count,
+    d.prize3_amount,
+    d.prize3_count,
+    d.prize4_amount,
+    d.prize4_count,
+    d.prize5_amount,
+    d.prize5_count,
+    d.prize6_amount,
+    d.prize6_count,
+    d.content,
+    d.details_link,
+    d.fetched_at,
+  ];
 }
 
-export function getDraw(code: string): DrawRow | null {
-  return (db().prepare(`SELECT * FROM draws WHERE code = ?`).get(code) as DrawRow | undefined) ?? null;
+export async function upsertDraws(rows: DrawRow[], conn?: PoolConnection): Promise<void> {
+  if (!rows.length) return;
+  if (!conn) await ensureSchema();
+  const chunkSize = 200;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const batch = rows.slice(i, i + chunkSize);
+    const placeholders = batch.map(() => DRAW_ROW_PLACEHOLDERS).join(",");
+    const sql = `INSERT INTO draws (${DRAW_COLUMNS}) VALUES ${placeholders} ON DUPLICATE KEY UPDATE ${DRAW_UPDATE}`;
+    const params = batch.flatMap(drawValues);
+    if (conn) await conn.execute(sql, params);
+    else await execute(sql, params);
+  }
 }
 
-export function latestDraw(): DrawRow | null {
-  return (db().prepare(`SELECT * FROM draws ORDER BY date DESC, code DESC LIMIT 1`).get() as DrawRow | undefined) ?? null;
+export async function upsertDraw(d: Omit<DrawRow, "fetched_at"> & { fetched_at?: number }): Promise<void> {
+  await upsertDraws([{ ...d, fetched_at: d.fetched_at ?? Date.now() }]);
 }
 
-export function listDraws(limit = 50): DrawRow[] {
-  return db()
-    .prepare(`SELECT * FROM draws ORDER BY date DESC, code DESC LIMIT ?`)
-    .all(limit) as DrawRow[];
+export async function getDraw(code: string): Promise<DrawRow | null> {
+  await ensureSchema();
+  const rows = await select<DrawRow>("SELECT * FROM draws WHERE code = ?", [code]);
+  return rows[0] ?? null;
+}
+
+export async function latestDraw(): Promise<DrawRow | null> {
+  await ensureSchema();
+  const rows = await select<DrawRow>("SELECT * FROM draws ORDER BY `date` DESC, code DESC LIMIT 1");
+  return rows[0] ?? null;
+}
+
+export async function listDraws(limit = 50): Promise<DrawRow[]> {
+  await ensureSchema();
+  const n = Math.max(1, Math.min(Number(limit) || 50, 10000));
+  return select<DrawRow>("SELECT * FROM draws ORDER BY `date` DESC, code DESC LIMIT ?", [n]);
+}
+
+export async function listDrawsSince(startCode: string | null, limit = 10000): Promise<DrawRow[]> {
+  await ensureSchema();
+  const n = Math.max(1, Math.min(Number(limit) || 10000, 10000));
+  if (!startCode) {
+    return select<DrawRow>("SELECT * FROM draws ORDER BY code ASC LIMIT ?", [n]);
+  }
+  return select<DrawRow>("SELECT * FROM draws WHERE code >= ? ORDER BY code ASC LIMIT ?", [startCode, n]);
 }
 
 /* ====== bets ====== */
@@ -171,43 +357,52 @@ export interface BetRow {
   updated_at: number;
 }
 
-export function listBets(activeOnly = false): BetRow[] {
-  const sql = activeOnly ? `SELECT * FROM bets WHERE active=1 ORDER BY id ASC` : `SELECT * FROM bets ORDER BY id ASC`;
-  return db().prepare(sql).all() as BetRow[];
+export async function listBets(activeOnly = false): Promise<BetRow[]> {
+  await ensureSchema();
+  const sql = activeOnly
+    ? "SELECT * FROM bets WHERE active=1 ORDER BY id ASC"
+    : "SELECT * FROM bets ORDER BY id ASC";
+  return select<BetRow>(sql);
 }
 
-export function getBet(id: number): BetRow | null {
-  return (db().prepare(`SELECT * FROM bets WHERE id = ?`).get(id) as BetRow | undefined) ?? null;
+export async function getBet(id: number): Promise<BetRow | null> {
+  await ensureSchema();
+  const rows = await select<BetRow>("SELECT * FROM bets WHERE id = ?", [id]);
+  return rows[0] ?? null;
 }
 
-export function createBet(input: {
+export async function createBet(input: {
   name: string;
   type: "single" | "complex" | "danTuo";
   payload: unknown;
   unit_price?: number;
   buy_enabled?: number;
   start_code?: string | null;
-}): number {
+}): Promise<number> {
+  await ensureSchema();
   const now = Date.now();
-  const stmt = db().prepare(
+  const res = await execute(
     `INSERT INTO bets (name, type, payload, unit_price, buy_enabled, active, start_code, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+    [
+      input.name,
+      input.type,
+      JSON.stringify(input.payload),
+      input.unit_price ?? 200,
+      input.buy_enabled ?? 1,
+      input.start_code ?? null,
+      now,
+      now,
+    ]
   );
-  const r = stmt.run(
-    input.name,
-    input.type,
-    JSON.stringify(input.payload),
-    input.unit_price ?? 200, // 默认 2 元 = 200 分
-    input.buy_enabled ?? 1,
-    input.start_code ?? null,
-    now,
-    now
-  );
-  return Number(r.lastInsertRowid);
+  return Number(res.insertId);
 }
 
-export function updateBet(id: number, patch: Partial<{ name: string; payload: unknown; unit_price: number; buy_enabled: number; active: number; start_code: string | null }>): void {
-  const cur = getBet(id);
+export async function updateBet(
+  id: number,
+  patch: Partial<{ name: string; payload: unknown; unit_price: number; buy_enabled: number; active: number; start_code: string | null }>
+): Promise<void> {
+  const cur = await getBet(id);
   if (!cur) throw new Error(`bet ${id} not found`);
   const next = {
     name: patch.name ?? cur.name,
@@ -218,13 +413,15 @@ export function updateBet(id: number, patch: Partial<{ name: string; payload: un
     start_code: patch.start_code !== undefined ? patch.start_code : cur.start_code,
     updated_at: Date.now(),
   };
-  db().prepare(
-    `UPDATE bets SET name=@name, payload=@payload, unit_price=@unit_price, buy_enabled=@buy_enabled, active=@active, start_code=@start_code, updated_at=@updated_at WHERE id=@id`
-  ).run({ ...next, id });
+  await execute(
+    "UPDATE bets SET name=?, payload=?, unit_price=?, buy_enabled=?, active=?, start_code=?, updated_at=? WHERE id=?",
+    [next.name, next.payload, next.unit_price, next.buy_enabled, next.active, next.start_code, next.updated_at, id]
+  );
 }
 
-export function deleteBet(id: number): void {
-  db().prepare(`DELETE FROM bets WHERE id = ?`).run(id);
+export async function deleteBet(id: number): Promise<void> {
+  await ensureSchema();
+  await execute("DELETE FROM bets WHERE id = ?", [id]);
 }
 
 /* ====== hit_records ====== */
@@ -240,39 +437,72 @@ export interface HitRow {
   created_at: number;
 }
 
-export function upsertHitRecord(rec: Omit<HitRow, "id" | "created_at">): void {
-  db()
-    .prepare(
-      `INSERT INTO hit_records (draw_code, bet_id, units, cost, win_amount, breakdown, created_at)
-       VALUES (@draw_code,@bet_id,@units,@cost,@win_amount,@breakdown,@created_at)
-       ON CONFLICT(draw_code, bet_id) DO UPDATE SET
-         units=excluded.units, cost=excluded.cost, win_amount=excluded.win_amount, breakdown=excluded.breakdown`
-    )
-    .run({ ...rec, created_at: Date.now() });
+type HitInput = Omit<HitRow, "id" | "created_at"> & { created_at?: number };
+
+const HIT_COLUMNS = "draw_code,bet_id,units,cost,win_amount,breakdown,created_at";
+const HIT_ROW_PLACEHOLDERS = "(?,?,?,?,?,?,?)";
+const HIT_UPDATE =
+  "units=VALUES(units),cost=VALUES(cost),win_amount=VALUES(win_amount),breakdown=VALUES(breakdown)";
+
+function hitValues(h: HitInput): any[] {
+  return [h.draw_code, h.bet_id, h.units, h.cost, h.win_amount, h.breakdown, h.created_at ?? Date.now()];
 }
 
-export function listHitsByDraw(code: string): HitRow[] {
-  return db().prepare(`SELECT * FROM hit_records WHERE draw_code = ?`).all(code) as HitRow[];
+export async function upsertHitRecords(records: HitInput[], conn?: PoolConnection): Promise<void> {
+  if (!records.length) return;
+  if (!conn) await ensureSchema();
+  const chunkSize = 500;
+  for (let i = 0; i < records.length; i += chunkSize) {
+    const batch = records.slice(i, i + chunkSize);
+    const placeholders = batch.map(() => HIT_ROW_PLACEHOLDERS).join(",");
+    const sql = `INSERT INTO hit_records (${HIT_COLUMNS}) VALUES ${placeholders} ON DUPLICATE KEY UPDATE ${HIT_UPDATE}`;
+    const params = batch.flatMap(hitValues);
+    if (conn) await conn.execute(sql, params);
+    else await execute(sql, params);
+  }
 }
 
-export function listAllHits(): HitRow[] {
-  return db().prepare(`SELECT * FROM hit_records ORDER BY draw_code DESC`).all() as HitRow[];
+export async function upsertHitRecord(rec: HitInput): Promise<void> {
+  await upsertHitRecords([rec]);
 }
 
-export function listHitsByBet(betId: number): HitRow[] {
-  return db().prepare(`SELECT * FROM hit_records WHERE bet_id = ? ORDER BY draw_code DESC`).all(betId) as HitRow[];
+export async function deleteHitsByBet(betId: number, conn?: PoolConnection): Promise<number> {
+  if (conn) {
+    const [res] = await conn.execute("DELETE FROM hit_records WHERE bet_id = ?", [betId]);
+    return (res as ResultSetHeader).affectedRows;
+  }
+  await ensureSchema();
+  const res = await execute("DELETE FROM hit_records WHERE bet_id = ?", [betId]);
+  return res.affectedRows;
+}
+
+export async function listHitsByDraw(code: string): Promise<HitRow[]> {
+  await ensureSchema();
+  return select<HitRow>("SELECT * FROM hit_records WHERE draw_code = ?", [code]);
+}
+
+export async function listAllHits(): Promise<HitRow[]> {
+  await ensureSchema();
+  return select<HitRow>("SELECT * FROM hit_records ORDER BY draw_code DESC");
+}
+
+export async function listHitsByBet(betId: number): Promise<HitRow[]> {
+  await ensureSchema();
+  return select<HitRow>("SELECT * FROM hit_records WHERE bet_id = ? ORDER BY draw_code DESC", [betId]);
 }
 
 /* ====== meta ====== */
 
-export function setMeta(key: string, value: string): void {
-  db().prepare(
-    `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`
-  ).run(key, value, Date.now());
+export async function setMeta(key: string, value: string): Promise<void> {
+  await ensureSchema();
+  await execute(
+    "INSERT INTO app_meta (meta_key, value, updated_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE value=VALUES(value), updated_at=VALUES(updated_at)",
+    [key, value, Date.now()]
+  );
 }
 
-export function getMeta(key: string): string | null {
-  const r = db().prepare(`SELECT value FROM app_meta WHERE key = ?`).get(key) as { value: string } | undefined;
-  return r?.value ?? null;
+export async function getMeta(key: string): Promise<string | null> {
+  await ensureSchema();
+  const rows = await select<{ value: string }>("SELECT value FROM app_meta WHERE meta_key = ?", [key]);
+  return rows[0]?.value ?? null;
 }

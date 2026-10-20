@@ -17,9 +17,9 @@ function typeLabel(t: string): string {
   return t;
 }
 
-// 进程内唯一的同步启动入口。
-// 注意：不要改回 Next 的 instrumentationHook —— Next 14 会把 better-sqlite3
-// 一起打进 edge bundle，导致所有 SSR 页面 500。这里用 globalThis 做单例，
+// 进程内启动入口（首页 SSR + /api/health 都会触发，内部去重）。
+// 注意：不要改回 Next 的 instrumentationHook —— Next 14 会把数据库驱动
+// 一并打进 edge bundle，导致所有 SSR 页面 500。这里用 globalThis 做单例，
 // 保证多次 SSR / HMR 只触发一次。
 declare global {
   // eslint-disable-next-line no-var
@@ -33,7 +33,7 @@ async function bootstrapSyncOnce() {
   if (!globalThis.__ssq_seed_started) {
     globalThis.__ssq_seed_started = true;
     const { ensureLatestSeed } = await import("@/lib/sync/runner");
-    ensureLatestSeed();
+    void ensureLatestSeed();
   }
   if (!globalThis.__ssq_scheduler_started) {
     globalThis.__ssq_scheduler_started = true;
@@ -44,9 +44,9 @@ async function bootstrapSyncOnce() {
 
 export default async function HomePage() {
   noStore();
-  const latest = latestDraw();
-  const bets = listBets(true);
-  const lastSync = getMeta("last_sync_at");
+  const latest = await latestDraw();
+  const bets = await listBets(true);
+  const lastSync = await getMeta("last_sync_at");
 
   // 第一次 SSR 时触发一次；同步在后台运行，不阻塞首屏
   void bootstrapSyncOnce();
@@ -61,7 +61,7 @@ export default async function HomePage() {
     );
   }
 
-  const hits = listHitsByDraw(latest.code);
+  const hits = await listHitsByDraw(latest.code);
   const totalWin = hits.reduce((s, h) => s + h.win_amount, 0);
   const totalCost = hits.reduce((s, h) => s + h.cost, 0);
 

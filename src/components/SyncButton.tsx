@@ -11,7 +11,10 @@ export function SyncButton({ onResult }: { onResult?: (msg: string) => void }) {
     try {
       const r = await fetch("/api/sync", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(code ? { code } : {}) });
       const j = await r.json();
-      const text = `拉取 ${j.fetched ?? 0} 期 · 入库 ${j.saved ?? 0} · 结算 ${j.hits ?? 0} 次${j.errors?.length ? " · 错误 " + j.errors.length : ""}`;
+      const base = j.skipped
+        ? `无新开奖（检查 ${j.fetched ?? 0} 期）`
+        : `拉取 ${j.fetched ?? 0} 期 · 新增 ${j.saved ?? 0} 期 · 结算 ${j.hits ?? 0} 条`;
+      const text = `${base}${j.errors?.length ? " · 错误 " + j.errors.length : ""}`;
       setMsg(text);
       onResult?.(text);
     } catch (e: any) {

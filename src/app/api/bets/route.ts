@@ -4,15 +4,16 @@ import { normalizeBetPayload, validateBet } from "@/lib/sync/adapter";
 import { resyncBet } from "@/lib/sync/runner";
 
 export async function GET() {
+  const bets = await listBets(false);
   return NextResponse.json({
-    bets: listBets(false),
-    nextDrawCode: nextExpected(),
+    bets,
+    nextDrawCode: await nextExpected(),
   });
 }
 
 /** 计算下一期号（用于默认 start_code） */
-function nextExpected(): string | null {
-  const latest = latestDraw();
+async function nextExpected(): Promise<string | null> {
+  const latest = await latestDraw();
   if (!latest) return null;
   const year = parseInt(latest.code.slice(0, 4), 10);
   const seq = parseInt(latest.code.slice(4), 10);
@@ -42,16 +43,16 @@ export async function POST(req: Request) {
   if (mode === "all") {
     startCode = null;
   } else if (mode === "custom") {
-    startCode = b.start_code ?? nextExpected();
+    startCode = b.start_code ?? (await nextExpected());
   } else {
     // "next" 或未传：保持原有默认行为
-    startCode = b.start_code ?? nextExpected();
+    startCode = b.start_code ?? (await nextExpected());
   }
   if (startCode && !/^\d{7}$/.test(startCode)) {
     return NextResponse.json({ error: "start_code 必须是 7 位期号，如 2026102" }, { status: 400 });
   }
 
-  const id = createBet({
+  const id = await createBet({
     name: String(b.name ?? "未命名"),
     type,
     payload,
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
   // 创建后立刻按 start_code 结算已入库期（包含 start_code 自身）
   let resync: { recalc: number; deleted: number } | null = null;
   try {
-    resync = resyncBet(id);
+    resync = await resyncBet(id);
   } catch (e: any) {
     // resync 失败不阻塞创建
     resync = { recalc: 0, deleted: 0 };
@@ -95,12 +96,12 @@ export async function PUT(req: Request) {
     }
     patch.start_code = b.start_code || null;
   }
-  updateBet(id, patch);
+  await updateBet(id, patch);
 
   // 如果改了 start_code，触发追溯重算
   if (b.start_code !== undefined) {
     try {
-      resyncBet(id);
+      await resyncBet(id);
     } catch {}
   }
 
@@ -111,6 +112,6 @@ export async function DELETE(req: Request) {
   const url = new URL(req.url);
   const id = parseInt(url.searchParams.get("id") ?? "0", 10);
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-  deleteBet(id);
+  await deleteBet(id);
   return NextResponse.json({ ok: true });
 }

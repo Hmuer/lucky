@@ -14,8 +14,8 @@ function nextExpected(latestCode: string | null): string | null {
 
 export default async function BetsPage() {
   noStore();
-  const latest = latestDraw();
-  const bets = listBets(false).map((b) => ({
+  const latest = await latestDraw();
+  const bets = (await listBets(false)).map((b) => ({
     ...b,
     type: b.type as "single" | "complex" | "danTuo",
     payload: JSON.parse(b.payload),
