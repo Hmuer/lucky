@@ -191,18 +191,58 @@ sudo journalctl -u lucky.service -f
 常用运维命令：
 
 ```bash
-# 更新代码后的标准流程
-git pull
-./scripts/bootstrap-node.sh          # 版本未变则跳过下载
-./scripts/npm.sh ci                  # 依赖有变化时执行
-./scripts/npm.sh run build
-sudo systemctl restart lucky.service
+# 标准升级（拉取/装依赖/构建/重启/健康检查）
+./deploy.sh
 
+# 只重启
+sudo systemctl restart lucky.service
 sudo systemctl stop lucky.service
 sudo systemctl disable lucky.service  # 取消开机自启
 ```
 
 如果项目目录或运行用户不同，请在复制服务文件前修改 `WorkingDirectory`、`User`、`Group`、`PATH` 和 `ExecStart`。`ExecStart` 指向项目内 `./scripts/npm.sh`，`PATH` 也把 `.runtime/node/bin` 放在最前，因此服务完全不依赖宿主机的 `node`/`npm`。服务运行期间产生的 SQLite 数据仍保存在 `data/ssq.db`，日志由 systemd journal 统一收集。
+
+---
+
+## 升级与重新部署
+
+服务器入口：
+
+```bash
+bash /opt/lucky/reinstall.sh
+```
+
+它只是本地入口，实际执行仓库内的 `./deploy.sh`。其他部署环境可直接：
+
+```bash
+cd /path/to/lucky
+./deploy.sh
+```
+
+`deploy.sh` 的流程：
+
+1. 检查 `git status`，有未提交修改则停止
+2. `git pull --ff-only origin main`
+3. `./scripts/bootstrap-node.sh`（版本未变会跳过下载）
+4. `./scripts/npm.sh ci`
+5. `./scripts/npm.sh run build`
+6. 同步 `lucky.service` 到 `/etc/systemd/system/` 并重启
+7. 轮询 `/api/health`，失败时打印 `systemctl status` 与 `journalctl`
+
+> 不会删除 `data/`、`.runtime/`、`logs/`，脚本里没有 `rm -rf`；`git pull` 也不会覆盖这些 gitignore 目录。部署脚本要求以 root 运行。
+
+手动等价命令：
+
+```bash
+git pull --ff-only origin main
+./scripts/bootstrap-node.sh
+./scripts/npm.sh ci
+./scripts/npm.sh run build
+sudo cp lucky.service /etc/systemd/system/lucky.service
+sudo systemctl daemon-reload
+sudo systemctl restart lucky.service
+curl --fail http://127.0.0.1:3000/api/health
+```
 
 ---
 
@@ -340,6 +380,9 @@ A: `better-sqlite3` 是原生模块，ABI 与 Node 主版本绑定；项目用 `
 **Q: 怎么升级项目内 Node？**
 A: 修改 `.node-version` → `./scripts/bootstrap-node.sh` → `./scripts/npm.sh rebuild better-sqlite3` → `./scripts/npm.sh run build` → 重启服务。
 
+**Q: 怎么重新部署？**
+A: `bash /opt/lucky/reinstall.sh`（或项目内 `./deploy.sh`）。会快进拉 `main`、准备 Node、装依赖、构建、重启并检查 `/api/health`；不会删除 `data/`。
+
 **Q: 修改守号后要不要重新同步？**
 A: 不需要。每次同步会重新计算所有启用守号与所有已入库期号。直接点"立即同步开奖"即可。
 
@@ -368,6 +411,7 @@ lucky/
 ├── src/
 │   ├── app/                # Next.js App Router
 │   │   ├── api/            # REST API 路由
+│   │   │   ├── health/     # 健康检查（部署用）
 │   │   │   ├── sync/       # 触发同步
 │   │   │   ├── draws/      # 查询开奖
 │   │   │   ├── bets/       # 守号增删改
@@ -386,7 +430,8 @@ lucky/
 │       ├── crawler/        # 中彩网爬取
 │       ├── db/             # SQLite 仓库
 │       └── sync/           # 守号↔引擎适配 + 同步执行（含 backfillHistory / startScheduler）
-├── start.sh                # 一键启动脚本
+├── start.sh                # 一键启动脚本（开发模式）
+├── deploy.sh               # 一键重新部署（拉取/构建/重启/健康检查）
 ├── next.config.mjs         # Next.js 配置（better-sqlite3 走 Node 外部包）
 ├── package.json
 └── README.md
