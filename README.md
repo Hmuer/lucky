@@ -47,20 +47,21 @@
 
 | 项目 | 版本 |
 |---|---|
-| Node.js | ≥ 18（推荐 20+） |
-| npm | ≥ 9 |
-| 系统 | macOS / Linux / Windows (WSL) |
-| 网络 | 可访问 `cwl.gov.cn` |
+| Node.js | 22.x（项目内 `.runtime`，由 `.node-version` 锁定） |
+| npm | ≥ 9（随项目内 Node 提供） |
+| 系统 | Linux / macOS / Windows (WSL) |
+| 网络 | 可访问 `cwl.gov.cn`；首次引导需访问 `nodejs.org` |
 
-> 项目依赖 `better-sqlite3` 原生模块，Node 主版本需与执行 `npm install` 时一致。
-> `npm run dev/build/start` 会通过 `scripts/run-next.mjs` 自动选择能加载该模块的 Node；
-> 若提示找不到，请用运行服务的同一个 Node 执行 `npm rebuild better-sqlite3`。
+> 项目不依赖宿主机 Node。`./scripts/bootstrap-node.sh` 会按 `.node-version`
+> 下载官方 Node 到 `.runtime/`（约 200MB，已 gitignore），安装/构建/运行都用它。
+> 直接执行 `npm install` 时，`preinstall` 会拦截主版本不匹配的 Node。
 
-检查环境：
+检查环境（首次需先引导）：
 
 ```bash
-node -v
-npm -v
+./scripts/bootstrap-node.sh
+.runtime/node/bin/node -v
+./scripts/npm.sh -v
 ```
 
 ---
@@ -81,13 +82,23 @@ cd lucky
 # 如果你 fork 到了自己仓库，把 Hmuer 替换成你的用户名
 ```
 
-### 2. 安装依赖
+### 2. 安装项目内 Node 与依赖
 
 ```bash
-npm install
+./scripts/bootstrap-node.sh
+./scripts/npm.sh ci
 ```
 
-首次安装会拉 Next.js / React / better-sqlite3 / recharts 等，约 1~3 分钟。
+`bootstrap-node.sh` 会按 `.node-version` 下载对应平台的官方 Node，
+校验 SHA256 后解压到 `.runtime/`（约 200MB，已 gitignore）。
+国内网络可指定镜像：
+
+```bash
+NODE_MIRROR=https://npmmirror.com/mirrors/node ./scripts/bootstrap-node.sh
+```
+
+首次安装 Node + 依赖约 1~3 分钟。不要用宿主机 Node 直接 `npm install`，
+`preinstall` 会检查主版本并拦截。
 
 ### 3. 启动 Web 服务
 
@@ -97,8 +108,8 @@ npm install
 # 方式 A：一键脚本（开发/临时运行，自动后台启动 + 就绪检测）
 ./start.sh
 
-# 方式 B：直接用 npm（开发模式）
-npm run dev
+# 方式 B：直接用项目内 npm（开发模式）
+./scripts/npm.sh run dev
 ```
 
 启动成功后访问：**http://localhost:3000**
@@ -148,18 +159,21 @@ PID 文件：`logs/web.pid`（仅 `start.sh` 开发模式）
 > 定时同步已内置在 Web 进程内（每 30 分钟一次），无需额外启动 cron 进程。
 > 老版本里的 `./start.sh all` / `all-fg` 已被移除。
 
-Windows 用户如果没有 bash，可以直接 `npm run dev`，功能等价。
+Windows 建议使用 WSL；原生 Windows 没有 bash 时，请手动安装 Node 22 后再执行 `npm run dev`（主版本必须为 22）。
 
 ## systemd 服务（Linux）
 
-仓库内的 [`lucky.service`](lucky.service) 已按当前部署目录 `/opt/lucky/lucky` 配置，使用 `npm run start` 运行生产构建。首次安装或代码更新后，在项目目录执行：
+仓库内的 [`lucky.service`](lucky.service) 已按当前部署目录 `/opt/lucky/lucky` 配置，通过 `./scripts/npm.sh` 使用项目内 Node 22 运行生产构建。首次安装或代码更新后，在项目目录执行：
 
 ```bash
-# 确认依赖已安装并生成生产构建
-npm install
-npm run build
+# 1. 安装/更新项目内 Node（.node-version 变化时才会重新下载）
+./scripts/bootstrap-node.sh
 
-# 安装服务单元
+# 2. 安装依赖并生成生产构建
+./scripts/npm.sh ci
+./scripts/npm.sh run build
+
+# 3. 安装服务单元
 sudo cp lucky.service /etc/systemd/system/lucky.service
 sudo systemctl daemon-reload
 
@@ -177,12 +191,18 @@ sudo journalctl -u lucky.service -f
 常用运维命令：
 
 ```bash
-sudo systemctl restart lucky.service  # 更新代码并重新构建后执行
+# 更新代码后的标准流程
+git pull
+./scripts/bootstrap-node.sh          # 版本未变则跳过下载
+./scripts/npm.sh ci                  # 依赖有变化时执行
+./scripts/npm.sh run build
+sudo systemctl restart lucky.service
+
 sudo systemctl stop lucky.service
 sudo systemctl disable lucky.service  # 取消开机自启
 ```
 
-如果项目目录或运行用户不同，请在复制服务文件前修改 `WorkingDirectory`、`User`、`Group`、`PATH` 和 `ExecStart`；`ExecStart` 必须指向该用户实际使用的 npm。服务运行期间产生的 SQLite 数据仍保存在 `data/ssq.db`，日志由 systemd journal 统一收集。
+如果项目目录或运行用户不同，请在复制服务文件前修改 `WorkingDirectory`、`User`、`Group`、`PATH` 和 `ExecStart`。`ExecStart` 指向项目内 `./scripts/npm.sh`，`PATH` 也把 `.runtime/node/bin` 放在最前，因此服务完全不依赖宿主机的 `node`/`npm`。服务运行期间产生的 SQLite 数据仍保存在 `data/ssq.db`，日志由 systemd journal 统一收集。
 
 ---
 
@@ -292,7 +312,7 @@ sudo systemctl disable lucky.service  # 取消开机自启
 ## 引擎单测
 
 ```bash
-npm run test:engine
+./scripts/npm.sh run test:engine
 ```
 
 覆盖 7 类场景：单式命中、复式展开、胆拖展开、边界抛错、各奖级判定。
@@ -303,7 +323,7 @@ npm run test:engine
 ## 常见问题
 
 **Q: 启动后访问 :3000 报 500？**
-A: 多数是 `node_modules` 没装好。删掉 `node_modules` 重跑 `npm install`。
+A: 多数是 `node_modules` 没装好。用 `./scripts/npm.sh ci` 重装，不要用宿主机 Node 直接 `npm install`。
 
 **Q: 同步失败 / fetch error？**
 A: 中彩网偶尔抽风，脚本会保留错误日志。也可手动在首页"补录指定期"输入期号回填。
@@ -313,6 +333,12 @@ A: 浮动奖级（1/2 等）的金额来自官方 `typemoney` 字段；个别期
 
 **Q: 为什么最早只有 2013 年的数据？**
 A: 中彩网当前接口只提供 2013 年至今的开奖记录（约 2,000 期）。更早的数据需要接入其它数据源，本工具未内置。
+
+**Q: 为什么项目里要单独放一个 Node？**
+A: `better-sqlite3` 是原生模块，ABI 与 Node 主版本绑定；项目用 `.runtime` 固定 Node 22，避免宿主机 Node 升级或切换导致构建/运行失败。`.runtime` 不提交 Git，删掉后重新执行 `./scripts/bootstrap-node.sh` 即可。
+
+**Q: 怎么升级项目内 Node？**
+A: 修改 `.node-version` → `./scripts/bootstrap-node.sh` → `./scripts/npm.sh rebuild better-sqlite3` → `./scripts/npm.sh run build` → 重启服务。
 
 **Q: 修改守号后要不要重新同步？**
 A: 不需要。每次同步会重新计算所有启用守号与所有已入库期号。直接点"立即同步开奖"即可。
@@ -329,11 +355,16 @@ A: `./start.sh reset`（需输入 `yes` 确认）。
 
 ```
 lucky/
+├── .node-version           # 固定的 Node 版本（22.23.2）
+├── .runtime/               # 项目内 Node（bootstrap 生成，gitignore，约 200MB）
 ├── data/                   # SQLite 数据（自动生成，gitignore）
 ├── logs/                   # 启动脚本的 PID/日志
 ├── scripts/
+│   ├── bootstrap-node.sh   # 下载/校验/解压 Node 到 .runtime
+│   ├── check-runtime.mjs   # npm install 前的 Node 主版本守卫
 │   ├── cron.mjs            # 可选：独立的外部轮询进程（默认不需要，定时同步已内置）
-│   └── run-next.mjs        # 自动选择兼容 Node 后启动 Next（规避原生模块 ABI 问题）
+│   ├── npm.sh              # 用项目内 Node 运行项目内 npm
+│   └── run-next.mjs        # 优先用 .runtime/node 启动 Next
 ├── src/
 │   ├── app/                # Next.js App Router
 │   │   ├── api/            # REST API 路由
