@@ -52,6 +52,10 @@
 | 系统 | macOS / Linux / Windows (WSL) |
 | 网络 | 可访问 `cwl.gov.cn` |
 
+> 项目依赖 `better-sqlite3` 原生模块，Node 主版本需与执行 `npm install` 时一致。
+> `npm run dev/build/start` 会通过 `scripts/run-next.mjs` 自动选择能加载该模块的 Node；
+> 若提示找不到，请用运行服务的同一个 Node 执行 `npm rebuild better-sqlite3`。
+
 检查环境：
 
 ```bash
@@ -328,7 +332,8 @@ lucky/
 ├── data/                   # SQLite 数据（自动生成，gitignore）
 ├── logs/                   # 启动脚本的 PID/日志
 ├── scripts/
-│   └── cron.mjs            # 可选：独立的外部轮询进程（默认不需要，定时同步已内置）
+│   ├── cron.mjs            # 可选：独立的外部轮询进程（默认不需要，定时同步已内置）
+│   └── run-next.mjs        # 自动选择兼容 Node 后启动 Next（规避原生模块 ABI 问题）
 ├── src/
 │   ├── app/                # Next.js App Router
 │   │   ├── api/            # REST API 路由
