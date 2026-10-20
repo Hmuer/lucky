@@ -2,14 +2,16 @@
   "name": "ssq-guard",
   "version": "0.1.0",
   "private": true,
-  "description": "双色球守号自动监控：官方爬取开奖、按单式/复式/胆拖自动核对、Web 管理与统计",
+  "description": "双色球守号自动监控：官方爬取开奖、按单式/复式/胆拖自动核对、Web 管理、小程序多用户与订阅推送",
   "scripts": {
     "setup:node": "bash scripts/bootstrap-node.sh",
     "dev": "node scripts/run-next.mjs dev -H 127.0.0.1 -p 3000",
     "build": "node scripts/run-next.mjs build",
     "start": "node scripts/run-next.mjs start -H 127.0.0.1 -p 3000",
     "test:engine": "tsx src/lib/engine/__tests__/run.ts",
+    "test:wx": "node --env-file=.env.local --import tsx scripts/test-wx.ts",
     "migrate:mysql": "tsx scripts/migrate-sqlite-to-mysql.ts",
+    "migrate:multiuser": "tsx scripts/migrate-multiuser.ts",
     "preinstall": "node scripts/check-runtime.mjs"
   },
   "engines": {
@@ -18,6 +20,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
+    "jose": "^5.10.0",
     "mysql2": "^3.24.6",
     "next": "14.2.18",
     "react": "18.3.1",

@@ -123,6 +123,20 @@ async function raw(sql: string): Promise<void> {
 }
 
 const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS users (
+    id INT NOT NULL AUTO_INCREMENT,
+    openid VARCHAR(128) NOT NULL,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_users_openid (openid)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS subscriptions (
+    user_id INT NOT NULL,
+    accepted TINYINT NOT NULL DEFAULT 0,
+    updated_at BIGINT NOT NULL,
+    PRIMARY KEY (user_id),
+    CONSTRAINT fk_sub_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS draws (
     code VARCHAR(16) NOT NULL,
     \`date\` DATE NOT NULL,
@@ -145,6 +159,7 @@ const SCHEMA = [
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS bets (
     id INT NOT NULL AUTO_INCREMENT,
+    user_id INT NOT NULL,
     name VARCHAR(255) NOT NULL,
     type VARCHAR(16) NOT NULL,
     payload TEXT NOT NULL,
@@ -154,10 +169,13 @@ const SCHEMA = [
     start_code VARCHAR(16) NULL,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL,
-    PRIMARY KEY (id)
+    PRIMARY KEY (id),
+    KEY idx_bets_user (user_id),
+    CONSTRAINT fk_bets_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS hit_records (
     id BIGINT NOT NULL AUTO_INCREMENT,
+    user_id INT NOT NULL,
     draw_code VARCHAR(16) NOT NULL,
     bet_id INT NOT NULL,
     units INT NOT NULL,
@@ -168,6 +186,8 @@ const SCHEMA = [
     PRIMARY KEY (id),
     UNIQUE KEY uk_hit_draw_bet (draw_code, bet_id),
     KEY idx_hit_bet (bet_id),
+    KEY idx_hits_user (user_id),
+    CONSTRAINT fk_hit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_hit_draw FOREIGN KEY (draw_code) REFERENCES draws(code) ON DELETE CASCADE,
     CONSTRAINT fk_hit_bet FOREIGN KEY (bet_id) REFERENCES bets(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -342,10 +362,102 @@ export async function listDrawsSince(startCode: string | null, limit = 10000): P
   return select<DrawRow>("SELECT * FROM draws WHERE code >= ? ORDER BY code ASC LIMIT ?", [startCode, n]);
 }
 
+/* ====== users / subscriptions ====== */
+
+export interface UserRow {
+  id: number;
+  openid: string;
+  created_at: number;
+}
+
+export interface SubscriptionRow {
+  user_id: number;
+  accepted: number;
+  updated_at: number;
+}
+
+let _defaultUserIdPromise: Promise<number> | null = null;
+
+/** 网页端单人模式使用的默认用户；由 DEFAULT_USER_OPENID 指定，缺省 __default__ */
+export function getDefaultUserId(): Promise<number> {
+  if (!_defaultUserIdPromise) {
+    _defaultUserIdPromise = (async () => {
+      const openid = process.env.DEFAULT_USER_OPENID || "__default__";
+      const user = await findOrCreateUserByOpenid(openid);
+      return user.id;
+    })().catch((e) => {
+      _defaultUserIdPromise = null;
+      throw e;
+    });
+  }
+  return _defaultUserIdPromise;
+}
+
+export async function findOrCreateUserByOpenid(openid: string): Promise<{ id: number; isNew: boolean }> {
+  await ensureSchema();
+  const existing = await select<UserRow>("SELECT * FROM users WHERE openid = ?", [openid]);
+  if (existing[0]) return { id: existing[0].id, isNew: false };
+
+  try {
+    const res = await execute("INSERT INTO users (openid, created_at) VALUES (?, ?)", [openid, Date.now()]);
+    return { id: Number(res.insertId), isNew: true };
+  } catch (e: any) {
+    if (e?.code === "ER_DUP_ENTRY") {
+      const rows = await select<UserRow>("SELECT * FROM users WHERE openid = ?", [openid]);
+      if (rows[0]) return { id: rows[0].id, isNew: false };
+    }
+    throw e;
+  }
+}
+
+export async function getUserById(id: number): Promise<UserRow | null> {
+  await ensureSchema();
+  const rows = await select<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
+  return rows[0] ?? null;
+}
+
+export async function getSubscription(userId: number): Promise<SubscriptionRow | null> {
+  await ensureSchema();
+  const rows = await select<SubscriptionRow>("SELECT * FROM subscriptions WHERE user_id = ?", [userId]);
+  return rows[0] ?? null;
+}
+
+export async function setSubscription(userId: number, accepted: boolean): Promise<void> {
+  await ensureSchema();
+  await execute(
+    `INSERT INTO subscriptions (user_id, accepted, updated_at) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE accepted=VALUES(accepted), updated_at=VALUES(updated_at)`,
+    [userId, accepted ? 1 : 0, Date.now()]
+  );
+}
+
+export interface PushTarget {
+  user_id: number;
+  openid: string;
+  profit: number;
+}
+
+/** 本期有命中记录、且已授权订阅的用户（用于推送） */
+export async function listPushTargets(drawCode: string): Promise<PushTarget[]> {
+  await ensureSchema();
+  const rows = await select<{ user_id: number; openid: string; profit: string | number }>(
+    `SELECT u.id AS user_id, u.openid, SUM(h.win_amount - h.cost) AS profit
+     FROM users u
+     JOIN subscriptions s ON s.user_id = u.id AND s.accepted = 1
+     JOIN hit_records h ON h.user_id = u.id AND h.draw_code = ?
+     JOIN bets b ON b.id = h.bet_id AND b.user_id = u.id AND b.active = 1 AND b.buy_enabled = 1
+     GROUP BY u.id, u.openid
+     ORDER BY u.id ASC`,
+    [drawCode]
+  );
+  return rows.map((r) => ({ user_id: Number(r.user_id), openid: r.openid, profit: Number(r.profit) }));
+}
+
 /* ====== bets ====== */
 
 export interface BetRow {
   id: number;
+  user_id: number;
   name: string;
   type: string;
   payload: string;
@@ -357,17 +469,24 @@ export interface BetRow {
   updated_at: number;
 }
 
-export async function listBets(activeOnly = false): Promise<BetRow[]> {
+export async function listBets(activeOnly = false, userId?: number | null): Promise<BetRow[]> {
   await ensureSchema();
-  const sql = activeOnly
-    ? "SELECT * FROM bets WHERE active=1 ORDER BY id ASC"
-    : "SELECT * FROM bets ORDER BY id ASC";
-  return select<BetRow>(sql);
+  const uid = userId === undefined ? await getDefaultUserId() : userId;
+  const conditions: string[] = [];
+  const params: any[] = [];
+  if (uid !== null) {
+    conditions.push("user_id = ?");
+    params.push(uid);
+  }
+  if (activeOnly) conditions.push("active = 1");
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")} ` : "";
+  return select<BetRow>(`SELECT * FROM bets ${where}ORDER BY id ASC`, params);
 }
 
-export async function getBet(id: number): Promise<BetRow | null> {
+export async function getBet(id: number, userId?: number): Promise<BetRow | null> {
   await ensureSchema();
-  const rows = await select<BetRow>("SELECT * FROM bets WHERE id = ?", [id]);
+  const uid = userId === undefined ? await getDefaultUserId() : userId;
+  const rows = await select<BetRow>("SELECT * FROM bets WHERE id = ? AND user_id = ?", [id, uid]);
   return rows[0] ?? null;
 }
 
@@ -377,19 +496,23 @@ export async function createBet(input: {
   payload: unknown;
   unit_price?: number;
   buy_enabled?: number;
+  active?: number;
   start_code?: string | null;
-}): Promise<number> {
+}, userId?: number): Promise<number> {
   await ensureSchema();
+  const uid = userId === undefined ? await getDefaultUserId() : userId;
   const now = Date.now();
   const res = await execute(
-    `INSERT INTO bets (name, type, payload, unit_price, buy_enabled, active, start_code, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+    `INSERT INTO bets (user_id, name, type, payload, unit_price, buy_enabled, active, start_code, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
+      uid,
       input.name,
       input.type,
       JSON.stringify(input.payload),
       input.unit_price ?? 200,
       input.buy_enabled ?? 1,
+      input.active ?? 1,
       input.start_code ?? null,
       now,
       now,
@@ -400,9 +523,10 @@ export async function createBet(input: {
 
 export async function updateBet(
   id: number,
-  patch: Partial<{ name: string; payload: unknown; unit_price: number; buy_enabled: number; active: number; start_code: string | null }>
+  patch: Partial<{ name: string; payload: unknown; unit_price: number; buy_enabled: number; active: number; start_code: string | null }>,
+  userId?: number
 ): Promise<void> {
-  const cur = await getBet(id);
+  const cur = await getBet(id, userId);
   if (!cur) throw new Error(`bet ${id} not found`);
   const next = {
     name: patch.name ?? cur.name,
@@ -414,20 +538,22 @@ export async function updateBet(
     updated_at: Date.now(),
   };
   await execute(
-    "UPDATE bets SET name=?, payload=?, unit_price=?, buy_enabled=?, active=?, start_code=?, updated_at=? WHERE id=?",
-    [next.name, next.payload, next.unit_price, next.buy_enabled, next.active, next.start_code, next.updated_at, id]
+    "UPDATE bets SET name=?, payload=?, unit_price=?, buy_enabled=?, active=?, start_code=?, updated_at=? WHERE id=? AND user_id=?",
+    [next.name, next.payload, next.unit_price, next.buy_enabled, next.active, next.start_code, next.updated_at, id, cur.user_id]
   );
 }
 
-export async function deleteBet(id: number): Promise<void> {
+export async function deleteBet(id: number, userId?: number): Promise<void> {
   await ensureSchema();
-  await execute("DELETE FROM bets WHERE id = ?", [id]);
+  const uid = userId === undefined ? await getDefaultUserId() : userId;
+  await execute("DELETE FROM bets WHERE id = ? AND user_id = ?", [id, uid]);
 }
 
 /* ====== hit_records ====== */
 
 export interface HitRow {
   id: number;
+  user_id: number;
   draw_code: string;
   bet_id: number;
   units: number;
@@ -437,15 +563,31 @@ export interface HitRow {
   created_at: number;
 }
 
+export interface HitWithDrawRow extends HitRow {
+  date: string;
+  week: string | null;
+  red: string;
+  blue: string;
+}
+
 type HitInput = Omit<HitRow, "id" | "created_at"> & { created_at?: number };
 
-const HIT_COLUMNS = "draw_code,bet_id,units,cost,win_amount,breakdown,created_at";
-const HIT_ROW_PLACEHOLDERS = "(?,?,?,?,?,?,?)";
+const HIT_COLUMNS = "user_id,draw_code,bet_id,units,cost,win_amount,breakdown,created_at";
+const HIT_ROW_PLACEHOLDERS = "(?,?,?,?,?,?,?,?)";
 const HIT_UPDATE =
   "units=VALUES(units),cost=VALUES(cost),win_amount=VALUES(win_amount),breakdown=VALUES(breakdown)";
 
 function hitValues(h: HitInput): any[] {
-  return [h.draw_code, h.bet_id, h.units, h.cost, h.win_amount, h.breakdown, h.created_at ?? Date.now()];
+  return [
+    h.user_id,
+    h.draw_code,
+    h.bet_id,
+    h.units,
+    h.cost,
+    h.win_amount,
+    h.breakdown,
+    h.created_at ?? Date.now(),
+  ];
 }
 
 export async function upsertHitRecords(records: HitInput[], conn?: PoolConnection): Promise<void> {
@@ -476,19 +618,38 @@ export async function deleteHitsByBet(betId: number, conn?: PoolConnection): Pro
   return res.affectedRows;
 }
 
-export async function listHitsByDraw(code: string): Promise<HitRow[]> {
+export async function listHitsByDraw(code: string, userId?: number): Promise<HitRow[]> {
   await ensureSchema();
-  return select<HitRow>("SELECT * FROM hit_records WHERE draw_code = ?", [code]);
+  const uid = userId === undefined ? await getDefaultUserId() : userId;
+  return select<HitRow>("SELECT * FROM hit_records WHERE draw_code = ? AND user_id = ?", [code, uid]);
 }
 
-export async function listAllHits(): Promise<HitRow[]> {
+export async function listAllHits(userId?: number): Promise<HitRow[]> {
   await ensureSchema();
-  return select<HitRow>("SELECT * FROM hit_records ORDER BY draw_code DESC");
+  const uid = userId === undefined ? await getDefaultUserId() : userId;
+  return select<HitRow>("SELECT * FROM hit_records WHERE user_id = ? ORDER BY draw_code DESC", [uid]);
 }
 
-export async function listHitsByBet(betId: number): Promise<HitRow[]> {
+export async function listHitsByBet(betId: number, userId?: number): Promise<HitRow[]> {
   await ensureSchema();
-  return select<HitRow>("SELECT * FROM hit_records WHERE bet_id = ? ORDER BY draw_code DESC", [betId]);
+  const uid = userId === undefined ? await getDefaultUserId() : userId;
+  return select<HitRow>(
+    "SELECT * FROM hit_records WHERE bet_id = ? AND user_id = ? ORDER BY draw_code DESC",
+    [betId, uid]
+  );
+}
+
+/** 小程序历史记录：命中记录 + 对应开奖期，按期号倒序 */
+export async function listHitsWithDraw(userId: number): Promise<HitWithDrawRow[]> {
+  await ensureSchema();
+  return select<HitWithDrawRow>(
+    `SELECT h.*, d.\`date\` AS date, d.week, d.red, d.blue
+     FROM hit_records h
+     JOIN draws d ON d.code = h.draw_code
+     WHERE h.user_id = ?
+     ORDER BY h.draw_code DESC`,
+    [userId]
+  );
 }
 
 /* ====== meta ====== */

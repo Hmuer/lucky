@@ -19,6 +19,7 @@ import { createConnection } from "mysql2/promise";
 import {
   closePool,
   ensureSchema,
+  findOrCreateUserByOpenid,
   getPool,
   upsertDraws,
   upsertHitRecords,
@@ -88,20 +89,24 @@ async function main(): Promise<void> {
     `[migrate] SQLite: draws=${draws.length} bets=${bets.length} hits=${hits.length} meta=${meta.length}`
   );
 
+  const defaultUser = await findOrCreateUserByOpenid(process.env.DEFAULT_USER_OPENID || "__default__");
+  const hitsWithUser = hits.map((h) => ({ ...h, user_id: defaultUser.id }));
+
   await withTransaction(async (conn) => {
     await upsertDraws(draws, conn);
 
     for (const b of bets) {
       await conn.execute(
-        `INSERT INTO bets (id, name, type, payload, unit_price, buy_enabled, active, start_code, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO bets (id, user_id, name, type, payload, unit_price, buy_enabled, active, start_code, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
-           name=VALUES(name), type=VALUES(type), payload=VALUES(payload),
+           user_id=VALUES(user_id), name=VALUES(name), type=VALUES(type), payload=VALUES(payload),
            unit_price=VALUES(unit_price), buy_enabled=VALUES(buy_enabled),
            active=VALUES(active), start_code=VALUES(start_code),
            created_at=VALUES(created_at), updated_at=VALUES(updated_at)`,
         [
           b.id,
+          defaultUser.id,
           b.name,
           b.type,
           b.payload,
@@ -115,7 +120,7 @@ async function main(): Promise<void> {
       );
     }
 
-    await upsertHitRecords(hits, conn);
+    await upsertHitRecords(hitsWithUser, conn);
 
     for (const m of meta) {
       await conn.execute(

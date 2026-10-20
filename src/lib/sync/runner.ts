@@ -2,14 +2,15 @@
  * 自动同步：拉取最新开奖 → 只在有新期时入库并结算
  *
  * 成本策略（TDSQL-C 按量付费）：
- * 1. 不再每 30 分钟轮询；只在双色球开奖日（周二/四/日）21:35 检查，
- *    结果未出时最多重试 3 次（每次间隔 30 分钟）。
+ * 1. 不再每 30 分钟轮询；只在双色球开奖日（周二/四/日）21:30 开始，
+ *    每 10 分钟检查一次，拿到新期即停止本轮轮询并触发推送。
  * 2. 每次检查先比较库内最新期号；没有新期时只读 1 次、不写任何表。
  * 3. 新期只写这一期：draws upsert + hit_records 批量 upsert，单事务提交。
  * 4. 历史回填只在库为空时执行一次，批量写入。
  */
 
 import { fetchLatestDraws, parseDrawRow } from "../crawler/cwl";
+import { notifyDraw } from "../wx/push";
 import {
   deleteHitsByBet,
   getBet,
@@ -34,9 +35,12 @@ export interface SyncReport {
   hits: number;
   errors: string[];
   skipped: boolean;
+  /** 本次新写入的期号（升序），用于同步后推送 */
+  newDraws: string[];
 }
 
 interface HitWrite {
+  user_id: number;
   draw_code: string;
   bet_id: number;
   units: number;
@@ -71,6 +75,7 @@ function buildHit(drawRow: DrawRow, bet: BetRow): HitWrite | null {
   };
   const result = settle(rowToBet(bet), draw, { prizeAmounts: prizeAmountsFrom(drawRow) });
   return {
+    user_id: bet.user_id,
     draw_code: drawRow.code,
     bet_id: bet.id,
     units: result.units,
@@ -96,7 +101,7 @@ function buildHits(drawRows: DrawRow[], bets: BetRow[]): HitWrite[] {
  * 没有新期时不写 draws / hit_records / app_meta，直接返回 skipped。
  */
 export async function syncLatest(): Promise<SyncReport> {
-  const report: SyncReport = { fetched: 0, saved: 0, hits: 0, errors: [], skipped: false };
+  const report: SyncReport = { fetched: 0, saved: 0, hits: 0, errors: [], skipped: false, newDraws: [] };
 
   let rows;
   try {
@@ -130,7 +135,7 @@ export async function syncLatest(): Promise<SyncReport> {
       return report;
     }
 
-    const bets = await listBets(true);
+    const bets = await listBets(true, null);
     const hits = buildHits(parsed, bets);
 
     await withTransaction(async (conn) => {
@@ -140,6 +145,7 @@ export async function syncLatest(): Promise<SyncReport> {
 
     report.saved = parsed.length;
     report.hits = hits.length;
+    report.newDraws = parsed.map((d) => d.code);
     await setMeta("last_sync_at", new Date().toISOString());
     return report;
   } catch (e: any) {
@@ -150,7 +156,7 @@ export async function syncLatest(): Promise<SyncReport> {
 
 /** 手动补录/修复指定期：始终重新写这一期及其命中 */
 export async function syncOne(code: string): Promise<SyncReport> {
-  const report: SyncReport = { fetched: 0, saved: 0, hits: 0, errors: [], skipped: false };
+  const report: SyncReport = { fetched: 0, saved: 0, hits: 0, errors: [], skipped: false, newDraws: [] };
   try {
     const all = await fetchLatestDraws(100);
     const r = all.find((x) => x.code === code);
@@ -160,7 +166,7 @@ export async function syncOne(code: string): Promise<SyncReport> {
     }
     report.fetched = 1;
     const parsed = { ...parseDrawRow(r), fetched_at: Date.now() } as DrawRow;
-    const bets = await listBets(true);
+    const bets = await listBets(true, null);
     const hits = buildHits([parsed], bets);
 
     await withTransaction(async (conn) => {
@@ -170,6 +176,7 @@ export async function syncOne(code: string): Promise<SyncReport> {
 
     report.saved = 1;
     report.hits = hits.length;
+    report.newDraws = [parsed.code];
     await setMeta("last_sync_at", new Date().toISOString());
   } catch (e: any) {
     report.errors.push(e?.message ?? String(e));
@@ -256,10 +263,10 @@ export async function backfillHistory(): Promise<{ fetched: number; saved: numbe
 
 /** 对所有启用守号按当前 start_code 重新结算库内开奖（回填后/手动修复用） */
 export async function settleAllBets(): Promise<{ bet: number; recalc: number }> {
-  const bets = await listBets(true);
+  const bets = await listBets(true, null);
   let totalRecalc = 0;
   for (const b of bets) {
-    const r = await resyncBet(b.id);
+    const r = await resyncBet(b.id, b.user_id);
     totalRecalc += r.recalc;
   }
   return { bet: bets.length, recalc: totalRecalc };
@@ -270,8 +277,8 @@ export async function settleAllBets(): Promise<{ bet: number; recalc: number }> 
  * 删除旧 hit_records → 拉取 start_code 之后的期 → 批量写入（单事务）。
  * 用于新增守号、修改 start_code、手动修复。
  */
-export async function resyncBet(betId: number): Promise<{ recalc: number; deleted: number }> {
-  const bet = await getBet(betId);
+export async function resyncBet(betId: number, userId?: number): Promise<{ recalc: number; deleted: number }> {
+  const bet = await getBet(betId, userId);
   if (!bet) throw new Error(`bet ${betId} not found`);
 
   const draws = shouldSettle(bet) ? await listDrawsSince(bet.start_code) : [];
@@ -298,13 +305,31 @@ export async function nextDrawCode(): Promise<string | null> {
   return `${year}${String(seq + 1).padStart(3, "0")}`;
 }
 
-/* ====== 定时器：只在开奖日检查，避免无意义的 30 分钟轮询 ====== */
+/**
+ * 同步 + 推送：给小程序定时任务/手动同步使用。
+ * 一次同步可能补多期，只对最新一期推送，避免补数据时连续轰炸用户。
+ */
+export async function syncAndNotify(): Promise<SyncReport & { pushed: number }> {
+  const report = await syncLatest();
+  let pushed = 0;
+  if (report.newDraws.length) {
+    const latestNew = report.newDraws[report.newDraws.length - 1];
+    try {
+      pushed = await notifyDraw(latestNew);
+    } catch (e: any) {
+      report.errors.push(`push ${latestNew}: ${e?.message ?? e}`);
+    }
+  }
+  return { ...report, pushed };
+}
+
+/* ====== 定时器：开奖日 21:30 起每 10 分钟检查，拿到新期即停止 ====== */
 
 const DRAW_WEEKDAYS = new Set([0, 2, 4]); // 周日、周二、周四
 const DRAW_HOUR = 21;
-const DRAW_MINUTE = 35;
-const RETRY_DELAY_MS = 30 * 60 * 1000;
-const MAX_RETRIES = 3;
+const DRAW_MINUTE = 30;
+const RETRY_DELAY_MS = 10 * 60 * 1000;
+const MAX_RETRIES = 18; // 21:30 起最多轮询 3 小时
 
 let _schedulerStarted = false;
 let _tickRunning = false;
@@ -337,12 +362,12 @@ async function tick(reason: "draw" | "retry"): Promise<void> {
   if (_tickRunning) return;
   _tickRunning = true;
   try {
-    const r = await syncLatest();
+    const r = await syncAndNotify();
     if (r.errors.length) {
       console.error("[sync] 检查有错误:", r.errors.join("; "));
     }
     console.log(
-      `[sync] 检查完成: 拉取 ${r.fetched} 期，新增 ${r.saved} 期，结算 ${r.hits} 条${r.skipped ? "（无新开奖）" : ""}`
+      `[sync] 检查完成: 拉取 ${r.fetched} 期，新增 ${r.saved} 期，结算 ${r.hits} 条，推送 ${r.pushed} 人${r.skipped ? "（无新开奖）" : ""}`
     );
 
     if ((reason === "draw" || reason === "retry") && r.saved === 0 && _retryCount < MAX_RETRIES) {
@@ -370,12 +395,12 @@ async function tick(reason: "draw" | "retry"): Promise<void> {
 /**
  * 启动定时器：
  * - 启动 5 秒后做一次 catch-up（页面首次 SSR 也会触发，内部去重）
- * - 之后只在开奖日 21:35 检查；若结果未出，30 分钟后重试，最多 2 次
+ * - 开奖日 21:30 开始每 10 分钟检查；拿到新期即停止并推送，最多轮询 3 小时
  */
 export function startScheduler(): void {
   if (_schedulerStarted) return;
   _schedulerStarted = true;
-  console.log("[sync] 定时器已启动：仅开奖日（周二/四/日）21:35 检查，未出结果最多重试 3 次");
+  console.log("[sync] 定时器已启动：开奖日（周二/四/日）21:30 起每 10 分钟检查，拿到新期即停止");
 
   setTimeout(() => {
     void ensureLatestSeed().catch(() => {});
