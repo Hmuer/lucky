@@ -3,9 +3,12 @@
  * Next.js 启动包装器：自动选择能加载 better-sqlite3 的 Node 运行时。
  *
  * 背景：better-sqlite3 是原生模块，ABI 与安装依赖时的 Node 主版本绑定。
- * 本机 systemd 服务使用 Node 22（NODE_MODULE_VERSION 127），而交互式
- * shell 里的 node 可能是 Node 24（137）。直接用 Node 24 执行 next build
- * 会在预渲染阶段报 NODE_MODULE_VERSION 不匹配。
+ * 宿主机上可能同时存在多个 Node（如 22 和 24），直接用错版本执行
+ * next build 会在预渲染阶段报 NODE_MODULE_VERSION 不匹配。
+ *
+ * 优先使用项目内固定运行时 .runtime/node（由 scripts/bootstrap-node.sh 安装），
+ * 找不到时再回退到宿主的 Node。探测方式是实际打开一次内存 SQLite，
+ * 确保该 Node 能加载 better-sqlite3 的原生 addon。
  *
  * 用法：
  *   node scripts/run-next.mjs build
@@ -22,14 +25,20 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const nextBin = path.join(root, "node_modules", "next", "dist", "bin", "next");
 const dbModule = path.join(root, "node_modules", "better-sqlite3");
+const projectNode = path.join(root, ".runtime", "node", "bin", "node");
 
 if (!existsSync(nextBin)) {
-  console.error(`找不到 Next.js：${nextBin}，请先执行 npm install`);
+  console.error(`找不到 Next.js：${nextBin}，请先执行：./scripts/npm.sh ci`);
+  process.exit(1);
+}
+if (!existsSync(dbModule)) {
+  console.error(`找不到 better-sqlite3：${dbModule}，请先执行：./scripts/npm.sh ci`);
   process.exit(1);
 }
 
 const candidates = [
   process.env.NODE_BIN,
+  projectNode,
   process.execPath,
   "/usr/bin/node",
   "/usr/local/bin/node",

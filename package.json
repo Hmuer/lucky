@@ -4,10 +4,16 @@
   "private": true,
   "description": "双色球守号自动监控：官方爬取开奖、按单式/复式/胆拖自动核对、Web 管理与统计",
   "scripts": {
+    "setup:node": "bash scripts/bootstrap-node.sh",
     "dev": "node scripts/run-next.mjs dev -H 127.0.0.1 -p 3000",
     "build": "node scripts/run-next.mjs build",
     "start": "node scripts/run-next.mjs start -H 127.0.0.1 -p 3000",
-    "test:engine": "tsx src/lib/engine/__tests__/run.ts"
+    "test:engine": "tsx src/lib/engine/__tests__/run.ts",
+    "preinstall": "node scripts/check-runtime.mjs"
+  },
+  "engines": {
+    "node": ">=22 <23",
+    "npm": ">=9"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

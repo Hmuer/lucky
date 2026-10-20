@@ -1,6 +1,7 @@
 node_modules/
 .next/
 out/
+.runtime/
 *.log
 *.sqlite
 *.sqlite-journal
