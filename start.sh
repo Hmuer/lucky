@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 双色球守号监控 - 一键启动
+# 双色球守号监控 - 一键启动（仅开发模式）
+# 生产环境请使用 systemd 的 lucky.service，日志走 journald。
 # 用法：
 #   ./start.sh           # 启动 Web（默认后台）。进程内自带定时同步，无需额外 cron。
 #   ./start.sh fg        # 前台运行 Web
@@ -9,7 +10,8 @@
 #   ./start.sh logs      # 跟踪日志
 #   ./start.sh reset     # 删除本地 SQLite 重新开始
 #
-# 日志：./logs/web.log
+# 开发日志：./logs/web.log（仅 next dev）
+# 生产日志：journalctl -u lucky.service -f
 # PID：./logs/web.pid
 
 set -e
@@ -47,8 +49,12 @@ start_web() {
     return 0
   fi
   need_deps
-  info "启动 Web 服务 → :3000 (后台)"
-  nohup npx next dev -H 127.0.0.1 -p 3000 > "$WEB_LOG" 2>&1 &
+  info "启动 Web 服务 → :3000 (后台，开发模式)"
+  {
+    echo "===== $(date '+%F %T') next dev 启动（仅开发模式） ====="
+    echo "===== 生产日志请用：journalctl -u lucky.service -f ====="
+  } > "$WEB_LOG"
+  nohup npx next dev -H 127.0.0.1 -p 3000 >> "$WEB_LOG" 2>&1 &
   echo $! > "$WEB_PID"
   # 等就绪
   for i in $(seq 1 30); do
@@ -81,13 +87,18 @@ status() {
   echo "--- 进程状态 ---"
   if is_running "$WEB_PID"; then
     ok "Web   运行中 (pid $(cat "$WEB_PID")) : http://localhost:3000"
+  elif curl -sS -o /dev/null -m 1 http://127.0.0.1:3000 2>/dev/null; then
+    warn "Web   未由 start.sh 托管，但 :3000 可访问（可能由 systemd 的 lucky.service 运行）"
+    info "生产状态：systemctl status lucky.service"
+    info "生产日志：journalctl -u lucky.service -f"
   else
     warn "Web   未运行"
   fi
   echo
   echo "--- 文件 ---"
   [ -f data/ssq.db ] && echo "DB: data/ssq.db ($(du -h data/ssq.db | awk '{print $1}'))" || echo "DB: 尚未生成"
-  [ -f "$WEB_LOG" ] && echo "Web log:  $WEB_LOG ($(wc -l < "$WEB_LOG") 行)" || true
+  [ -f "$WEB_LOG" ] && echo "开发日志: $WEB_LOG ($(wc -l < "$WEB_LOG") 行)" || true
+  echo "生产日志: journalctl -u lucky.service -f"
 }
 
 case "${1:-}" in
@@ -120,8 +131,13 @@ case "${1:-}" in
     npm run test:engine
     ;;
   logs)
-    info "跟踪 Web 日志（Ctrl+C 退出）"
-    tail -n 100 -f "$WEB_LOG" 2>/dev/null
+    if [ ! -f "$WEB_LOG" ]; then
+      warn "没有开发日志：$WEB_LOG"
+      info "如果服务由 systemd 运行，请用：journalctl -u lucky.service -f"
+      exit 0
+    fi
+    info "跟踪开发日志（Ctrl+C 退出）"
+    tail -n 100 -f "$WEB_LOG"
     ;;
   reset)
     warn "将删除 ./data/ssq.db（开奖/守号/命中记录全部清空）"
