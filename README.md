@@ -37,7 +37,7 @@
 - **盈亏统计**：累计花费、累计中奖、回本率、走势曲线（Recharts）
 - **守号历史中奖统计**：按守号聚合 1~6 等各中几注、单期最高奖金、累计花费/中奖/盈亏
 - **自动同步**：
-  - 首次启动自动回填 2003 年至今全部历史期（约 3600+ 期）
+  - 首次启动自动回填中彩网当前可提供的全部历史期（2013 年至今，约 2,000 期）
   - 进程内定时器每 30 分钟拉取一次最新开奖
   - 首页"立即同步开奖"按钮可手动触发增量同步
 
@@ -103,12 +103,16 @@ npm run dev
 
 ### 4. 首次同步开奖数据
 
-首次启动时会**自动**从中彩网拉取全部历史期（约 3600+ 期）入库，
-写入 `data/ssq.db`，几十秒到一两分钟完成（取决于网络）。
+首次启动时会**自动**从中彩网拉取当前可提供的全部历史期（2013 年至今，约 2,000 期）入库，
+写入 `data/ssq.db`，通常几十秒内完成（取决于网络）。
 
 完成后会立刻对所有启用守号做一次全量核对。
 
 如果想强制重新同步：删除 `data/ssq.db` 重启，或在首页手动点 **"立即同步开奖"**。
+
+> 中彩网接口目前只返回 2013 年及之后的开奖数据（更早期数据需接入其它数据源），
+> 因此库内最早期号约为 `2013001`。回填完成后会写入 `app_meta.history_backfilled=1`，
+> 之后启动只做增量同步；如需重新回填，删除 `data/ssq.db`（或清掉该 meta）后重启。
 
 ### 5. 添加守号
 
@@ -131,8 +135,11 @@ npm run dev
 | `./start.sh test` | 跑引擎单测 |
 | `./start.sh reset` | 清空 SQLite 重新开始（需输入 yes 确认） |
 
-PID 文件：`logs/web.pid`
-日志文件：`logs/web.log`
+PID 文件：`logs/web.pid`（仅 `start.sh` 开发模式）
+日志文件：`logs/web.log`（仅 `start.sh` 开发模式，每次启动会重写）
+
+> `logs/web.log` 只对应 `next dev`。生产环境由 systemd 托管，日志统一进 journald，
+> 请用 `journalctl -u lucky.service -f` 查看，不要用开发日志排查线上问题。
 
 > 定时同步已内置在 Web 进程内（每 30 分钟一次），无需额外启动 cron 进程。
 > 老版本里的 `./start.sh all` / `all-fg` 已被移除。
@@ -256,17 +263,22 @@ sudo systemctl disable lucky.service  # 取消开机自启
 
 进程内自带定时器，**无需任何额外配置**：
 
-- **首次启动**：`src/instrumentation.ts` 触发 `ensureLatestSeed()`
-  - 库里无数据 → 调用 `backfillHistory()` 分页拉取全部历史期（约 3600+ 期，耗时 1~2 分钟）
+- **首次启动**：首次页面 SSR 时由首页的 `bootstrapSyncOnce()` 触发 `ensureLatestSeed()`
+  - 库里无数据 → 调用 `backfillHistory()` 拉取中彩网可提供的全部历史期（2013 年至今，约 2,000 期）
   - 库里有数据 → 直接 `syncLatest()` 增量同步
   - 回填完成后会立刻对所有启用守号做一次全量核对
 - **运行中**：`startScheduler()` 每 **30 分钟**自动调一次 `syncLatest()`
-  - 只拉最近 20 期，按 `code` 主键 upsert，已存在的期会被刷新（官方有时会修正奖级金额）
-  - 模块级单例，多次 import 只启动一次
+  - 请求最近 20 期；中彩网接口当前会忽略 `pageSize` 返回其可提供的全量数据，
+    代码按 `code` 主键逐期 upsert，已存在的期会被刷新（官方有时会修正奖级金额）
+  - 模块级单例（`globalThis` 标记），多次 SSR / HMR 只启动一次
+
+> 早期版本用 `src/instrumentation.ts` + `experimental.instrumentationHook` 做启动入口，
+> 但 Next 14 会把 `better-sqlite3` 一并打进 edge bundle 导致 SSR 500，
+> 因此已改为首页懒启动，`src/instrumentation.ts` 已删除，不要重复添加。
 
 手动同步：
 
-- 首页右上角 **"立即同步开奖"** 按钮立即触发增量同步（拉最近 20 期）
+- 首页右上角 **"立即同步开奖"** 按钮立即触发一次 `syncLatest()`（请求最近 20 期，实际返回以接口为准）
 - API：`POST /api/sync`（无 body）
 
 如果想调整定时器频率，修改 `src/lib/sync/runner.ts` 中的 `SYNC_INTERVAL_MS`。
@@ -293,7 +305,10 @@ A: 多数是 `node_modules` 没装好。删掉 `node_modules` 重跑 `npm instal
 A: 中彩网偶尔抽风，脚本会保留错误日志。也可手动在首页"补录指定期"输入期号回填。
 
 **Q: 奖级金额显示 0？**
-A: 浮动奖级（1/2 等）的金额来自官方 `typemoney` 字段。早期（2013 之前）部分期没有该字段，会显示 0。
+A: 浮动奖级（1/2 等）的金额来自官方 `typemoney` 字段；个别期官方未给出该字段时会显示 0。
+
+**Q: 为什么最早只有 2013 年的数据？**
+A: 中彩网当前接口只提供 2013 年至今的开奖记录（约 2,000 期）。更早的数据需要接入其它数据源，本工具未内置。
 
 **Q: 修改守号后要不要重新同步？**
 A: 不需要。每次同步会重新计算所有启用守号与所有已入库期号。直接点"立即同步开奖"即可。
@@ -330,14 +345,13 @@ lucky/
 │   ├── components/         # 客户端组件
 │   │   ├── Balls.tsx       # 红/蓝号码球
 │   │   └── SyncButton.tsx  # 同步按钮
-│   ├── instrumentation.ts  # 进程级入口：触发首次回填 + 启动定时同步
 │   └── lib/
 │       ├── engine/         # 投注展开 + 命中结算 + 奖级表（纯函数，可单测）
 │       ├── crawler/        # 中彩网爬取
 │       ├── db/             # SQLite 仓库
 │       └── sync/           # 守号↔引擎适配 + 同步执行（含 backfillHistory / startScheduler）
 ├── start.sh                # 一键启动脚本
-├── next.config.mjs         # 启用 instrumentationHook
+├── next.config.mjs         # Next.js 配置（better-sqlite3 走 Node 外部包）
 ├── package.json
 └── README.md
 ```
