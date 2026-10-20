@@ -23,6 +23,12 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+if [ ! -f "$PROJECT_DIR/.env.local" ]; then
+  echo "缺少 $PROJECT_DIR/.env.local（DATABASE_URL），部署已停止。" >&2
+  echo "请先从 .env.example 复制并填入 MySQL 连接串。" >&2
+  exit 1
+fi
+
 if ! systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
   echo "未找到 systemd 服务：$SERVICE_NAME" >&2
   echo "请先安装 lucky.service，或通过 SERVICE_NAME 指定服务名。" >&2

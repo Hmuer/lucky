@@ -9,7 +9,7 @@
 #   ./start.sh status    # 查看状态
 #   ./start.sh test      # 跑引擎单测
 #   ./start.sh logs      # 跟踪日志
-#   ./start.sh reset     # 删除本地 SQLite 重新开始
+#   ./start.sh reset     # 说明：数据在 MySQL，不再删除本地库
 #
 # 开发日志：./logs/web.log（仅 next dev）
 # 生产日志：journalctl -u lucky.service -f
@@ -107,8 +107,10 @@ status() {
     warn "Web   未运行"
   fi
   echo
-  echo "--- 文件 ---"
-  [ -f data/ssq.db ] && echo "DB: data/ssq.db ($(du -h data/ssq.db | awk '{print $1}'))" || echo "DB: 尚未生成"
+  echo "--- 数据 ---"
+  echo "DB: MySQL（连接串见 .env.local 的 DATABASE_URL）"
+  [ -f .env.local ] && echo "配置: .env.local" || warn "缺少 .env.local，Web 将无法连接数据库"
+  [ -f data/ssq.db ] && echo "SQLite 备份: data/ssq.db ($(du -h data/ssq.db | awk '{print $1}'))" || true
   [ -f "$WEB_LOG" ] && echo "开发日志: $WEB_LOG ($(wc -l < "$WEB_LOG") 行)" || true
   echo "生产日志: journalctl -u lucky.service -f"
 }
@@ -152,15 +154,9 @@ case "${1:-}" in
     tail -n 100 -f "$WEB_LOG"
     ;;
   reset)
-    warn "将删除 ./data/ssq.db（开奖/守号/命中记录全部清空）"
-    read -rp "确认删除？[yes/N] " ans
-    if [ "$ans" = "yes" ]; then
-      stop_one "Web"  "$WEB_PID" || true
-      rm -rf data/ssq.db data/ssq.db-* 2>/dev/null || true
-      ok "已清空"
-    else
-      info "已取消"
-    fi
+    warn "数据已迁移到 TDSQL-C MySQL，start.sh reset 不再删除数据库。"
+    info "本地 data/ssq.db 仅作为迁移前备份，可手动删除。"
+    info "如需清空线上数据，请用 MySQL 客户端连接 DATABASE_URL 后手动操作（谨慎）。"
     ;;
   ""|start)
     start_web

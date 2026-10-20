@@ -9,9 +9,14 @@ User=root
 Group=root
 WorkingDirectory=/opt/lucky/lucky
 Environment=NODE_ENV=production
+Environment=TZ=Asia/Shanghai
+# DATABASE_URL 等配置；文件不存在时不报错
+EnvironmentFile=-/opt/lucky/lucky/.env.local
 # 运行时由 scripts/bootstrap-node.sh 安装到 .runtime/，不使用宿主机 Node
 Environment=PATH=/opt/lucky/lucky/.runtime/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/opt/lucky/lucky/scripts/npm.sh run start
+# 启动后触发一次健康检查，确保同步定时器启动；失败不阻塞服务
+ExecStartPost=-/usr/bin/curl -fsS --retry 5 --retry-delay 1 --retry-connrefused http://127.0.0.1:3000/api/health
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30

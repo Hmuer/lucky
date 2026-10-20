@@ -1,6 +1,7 @@
 # 双色球守号监控
 
 > 数据源：中国福利彩票（中彩网 [cwl.gov.cn](https://www.cwl.gov.cn/)）
+> 数据存储：腾讯云 TDSQL-C（MySQL 8.0），连接串只放本地 `.env.local`
 > 仅供个人记账核对，非投注平台。彩票有风险，量力而行。
 
 自动监控每一期双色球开奖号码，按你设置的守号（单式 / 复式 / 胆拖）自动核对，
@@ -15,11 +16,12 @@
 - [快速开始](#快速开始)
 - [启动脚本](#启动脚本)
 - [systemd 服务（Linux）](#systemd-服务linux)
+- [升级与重新部署](#升级与重新部署)
 - [页面与操作指南](#页面与操作指南)
 - [支持的玩法](#支持的玩法)
 - [奖级与金额规则](#奖级与金额规则)
-- [数据存储](#数据存储)
-- [定时同步](#定时同步)
+- [数据存储（TDSQL-C MySQL）](#数据存储tdsql-c-mysql)
+- [同步与成本控制](#同步与成本控制)
 - [引擎单测](#引擎单测)
 - [常见问题](#常见问题)
 - [目录结构](#目录结构)
@@ -38,7 +40,7 @@
 - **守号历史中奖统计**：按守号聚合 1~6 等各中几注、单期最高奖金、累计花费/中奖/盈亏
 - **自动同步**：
   - 首次启动自动回填中彩网当前可提供的全部历史期（2013 年至今，约 2,000 期）
-  - 进程内定时器每 30 分钟拉取一次最新开奖
+  - 进程内定时器仅在开奖日（周二/四/日）检查，未出结果自动重试
   - 首页"立即同步开奖"按钮可手动触发增量同步
 
 ---
@@ -49,8 +51,9 @@
 |---|---|
 | Node.js | 22.x（项目内 `.runtime`，由 `.node-version` 锁定） |
 | npm | ≥ 9（随项目内 Node 提供） |
+| 数据库 | MySQL 8.0（腾讯云 TDSQL-C），需可访问实例端口 |
 | 系统 | Linux / macOS / Windows (WSL) |
-| 网络 | 可访问 `cwl.gov.cn`；首次引导需访问 `nodejs.org` |
+| 网络 | 可访问 `cwl.gov.cn`、`nodejs.org`，以及 TDSQL-C 实例端口 |
 
 > 项目不依赖宿主机 Node。`./scripts/bootstrap-node.sh` 会按 `.node-version`
 > 下载官方 Node 到 `.runtime/`（约 200MB，已 gitignore），安装/构建/运行都用它。
@@ -100,7 +103,34 @@ NODE_MIRROR=https://npmmirror.com/mirrors/node ./scripts/bootstrap-node.sh
 首次安装 Node + 依赖约 1~3 分钟。不要用宿主机 Node 直接 `npm install`，
 `preinstall` 会检查主版本并拦截。
 
-### 3. 启动 Web 服务
+### 3. 配置 TDSQL-C MySQL
+
+```bash
+cp .env.example .env.local
+# 编辑 .env.local，填入 DATABASE_URL
+```
+
+`.env.local` 已被 gitignore，不会提交。连接串格式：
+
+```text
+DATABASE_URL=mysql://用户名:密码@主机:3306/lucky
+```
+
+如果 `lucky` 库还不存在，先在 TDSQL-C 执行：
+
+```sql
+CREATE DATABASE lucky CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
+首次访问时应用会自动建表。如果已有旧版 SQLite 数据，执行一次迁移：
+
+```bash
+./scripts/npm.sh run migrate:mysql
+```
+
+迁移会校验行数与金额合计；`data/ssq.db` 会保留作为备份。
+
+### 4. 启动 Web 服务
 
 任选一种方式：
 
@@ -116,20 +146,21 @@ NODE_MIRROR=https://npmmirror.com/mirrors/node ./scripts/bootstrap-node.sh
 
 生产环境建议使用下面的 systemd 服务。systemd 直接托管前台进程，服务异常退出会自动重启，并可配置为开机自启。
 
-### 4. 首次同步开奖数据
+### 5. 首次同步开奖数据
 
-首次启动时会**自动**从中彩网拉取当前可提供的全部历史期（2013 年至今，约 2,000 期）入库，
-写入 `data/ssq.db`，通常几十秒内完成（取决于网络）。
+首次启动时会**自动**从中彩网拉取当前可提供的全部历史期（2013 年至今，约 2,000 期）写入 MySQL，
+通常几十秒内完成（取决于网络和数据库延迟）。
 
 完成后会立刻对所有启用守号做一次全量核对。
 
-如果想强制重新同步：删除 `data/ssq.db` 重启，或在首页手动点 **"立即同步开奖"**。
+如果想补齐最新开奖：在首页手动点 **"立即同步开奖"**；没有新期时不会写库。
 
 > 中彩网接口目前只返回 2013 年及之后的开奖数据（更早期数据需接入其它数据源），
 > 因此库内最早期号约为 `2013001`。回填完成后会写入 `app_meta.history_backfilled=1`，
-> 之后启动只做增量同步；如需重新回填，删除 `data/ssq.db`（或清掉该 meta）后重启。
+> 之后启动只做增量同步；如需重新回填，清空 MySQL 的 `draws`/`hit_records` 并删除
+> `app_meta` 中的 `history_backfilled` 后重启。
 
-### 5. 添加守号
+### 6. 添加守号
 
 进入 **守号管理** → 选玩法（单式/复式/胆拖）→ 点号码球选号 → 填写名称 → 保存。
 勾选 **"每期购买"** 的守号才会参与自动核对。
@@ -148,7 +179,7 @@ NODE_MIRROR=https://npmmirror.com/mirrors/node ./scripts/bootstrap-node.sh
 | `./start.sh logs` | 跟踪 Web 日志（Ctrl+C 退出） |
 | `./start.sh stop` | 停止 Web 进程 |
 | `./start.sh test` | 跑引擎单测 |
-| `./start.sh reset` | 清空 SQLite 重新开始（需输入 yes 确认） |
+| `./start.sh reset` | 查看 MySQL 清理说明（不再删除数据库） |
 
 PID 文件：`logs/web.pid`（仅 `start.sh` 开发模式）
 日志文件：`logs/web.log`（仅 `start.sh` 开发模式，每次启动会重写）
@@ -156,7 +187,7 @@ PID 文件：`logs/web.pid`（仅 `start.sh` 开发模式）
 > `logs/web.log` 只对应 `next dev`。生产环境由 systemd 托管，日志统一进 journald，
 > 请用 `journalctl -u lucky.service -f` 查看，不要用开发日志排查线上问题。
 
-> 定时同步已内置在 Web 进程内（每 30 分钟一次），无需额外启动 cron 进程。
+> 定时同步已内置在 Web 进程内（仅开奖日检查），无需额外启动 cron 进程。
 > 老版本里的 `./start.sh all` / `all-fg` 已被移除。
 
 Windows 建议使用 WSL；原生 Windows 没有 bash 时，请手动安装 Node 22 后再执行 `npm run dev`（主版本必须为 22）。
@@ -169,11 +200,15 @@ Windows 建议使用 WSL；原生 Windows 没有 bash 时，请手动安装 Node
 # 1. 安装/更新项目内 Node（.node-version 变化时才会重新下载）
 ./scripts/bootstrap-node.sh
 
-# 2. 安装依赖并生成生产构建
+# 2. 配置数据库（首次；之后保留 .env.local 即可）
+cp .env.example .env.local
+# 编辑 .env.local 填入 DATABASE_URL
+
+# 3. 安装依赖并生成生产构建
 ./scripts/npm.sh ci
 ./scripts/npm.sh run build
 
-# 3. 安装服务单元
+# 4. 安装服务单元
 sudo cp lucky.service /etc/systemd/system/lucky.service
 sudo systemctl daemon-reload
 
@@ -200,7 +235,7 @@ sudo systemctl stop lucky.service
 sudo systemctl disable lucky.service  # 取消开机自启
 ```
 
-如果项目目录或运行用户不同，请在复制服务文件前修改 `WorkingDirectory`、`User`、`Group`、`PATH` 和 `ExecStart`。`ExecStart` 指向项目内 `./scripts/npm.sh`，`PATH` 也把 `.runtime/node/bin` 放在最前，因此服务完全不依赖宿主机的 `node`/`npm`。服务运行期间产生的 SQLite 数据仍保存在 `data/ssq.db`，日志由 systemd journal 统一收集。
+如果项目目录或运行用户不同，请在复制服务文件前修改 `WorkingDirectory`、`User`、`Group`、`PATH` 和 `ExecStart`。`ExecStart` 指向项目内 `./scripts/npm.sh`，`PATH` 也把 `.runtime/node/bin` 放在最前，因此服务完全不依赖宿主机的 `node`/`npm`。`EnvironmentFile` 会读取项目内 `.env.local` 的 `DATABASE_URL`；业务数据保存在 TDSQL-C，日志由 systemd journal 统一收集。
 
 ---
 
@@ -222,14 +257,15 @@ cd /path/to/lucky
 `deploy.sh` 的流程：
 
 1. 检查 `git status`，有未提交修改则停止
-2. `git pull --ff-only origin main`
-3. `./scripts/bootstrap-node.sh`（版本未变会跳过下载）
-4. `./scripts/npm.sh ci`
-5. `./scripts/npm.sh run build`
-6. 同步 `lucky.service` 到 `/etc/systemd/system/` 并重启
-7. 轮询 `/api/health`，失败时打印 `systemctl status` 与 `journalctl`
+2. 检查 `.env.local` 是否存在
+3. `git pull --ff-only origin main`
+4. `./scripts/bootstrap-node.sh`（版本未变会跳过下载）
+5. `./scripts/npm.sh ci`
+6. `./scripts/npm.sh run build`
+7. 同步 `lucky.service` 到 `/etc/systemd/system/` 并重启
+8. 轮询 `/api/health`，失败时打印 `systemctl status` 与 `journalctl`
 
-> 不会删除 `data/`、`.runtime/`、`logs/`，脚本里没有 `rm -rf`；`git pull` 也不会覆盖这些 gitignore 目录。部署脚本要求以 root 运行。
+> 不会删除 `data/`、`.runtime/`、`logs/`、`.env.local`，脚本里没有 `rm -rf`；`git pull` 也不会覆盖这些 gitignore 文件。业务数据在 TDSQL-C，部署不会清库。部署脚本要求以 root 运行。
 
 手动等价命令：
 
@@ -308,44 +344,49 @@ curl --fail http://127.0.0.1:3000/api/health
 
 ---
 
-## 数据存储
+## 数据存储（TDSQL-C MySQL）
 
-- **位置**：`./data/ssq.db`（SQLite，WAL 模式）
-- **自动创建**：首次启动时自动建表
-- **备份**：直接复制 `data/ssq.db` 即可
-- **重置**：`./start.sh reset`
-
-表结构：
-- `draws`：开奖期（期号 / 日期 / 红蓝号 / 销售额 / 奖池 / 各级金额与注数）
-- `bets`：守号（名称 / 类型 / payload JSON / 单注金额 / 购买开关）
-- `hit_records`：每期每组守号汇总（花费 / 奖金 / 各级明细）
-- `app_meta`：最后同步时间等元信息
+- **引擎**：MySQL 8.0（腾讯云 TDSQL-C），库名 `lucky`
+- **连接**：`.env.local` 的 `DATABASE_URL`（已 gitignore，不会提交）
+- **建表**：首次访问时自动 `CREATE TABLE IF NOT EXISTS`
+- **表结构**：
+  - `draws`：开奖期（期号 / 日期 / 红蓝号 / 销售额 / 奖池 / 各级金额与注数）
+  - `bets`：守号（名称 / 类型 / payload JSON / 单注金额 / 购买开关）
+  - `hit_records`：每期每组守号汇总（花费 / 奖金 / 各级明细）
+  - `app_meta`：最后同步时间等元信息（`meta_key` / `value`）
+- **迁移**：`./scripts/npm.sh run migrate:mysql`（从 `data/ssq.db` 一次性导入，可重复执行并校验）
+- **备份**：用 TDSQL-C 控制台备份，或 `mysqldump --single-transaction`
+- **本地 SQLite**：`data/ssq.db` 仅作为迁移前备份，应用不再写入
+- **重置**：`./start.sh reset` 只打印说明，不再删库；清空需手动执行 SQL
 
 ---
 
-## 定时同步
+## 同步与成本控制
 
-进程内自带定时器，**无需任何额外配置**：
+目标：只在开奖后有新数据时写 MySQL，避免 30 分钟轮询和重复 upsert。
 
-- **首次启动**：首次页面 SSR 时由首页的 `bootstrapSyncOnce()` 触发 `ensureLatestSeed()`
-  - 库里无数据 → 调用 `backfillHistory()` 拉取中彩网可提供的全部历史期（2013 年至今，约 2,000 期）
-  - 库里有数据 → 直接 `syncLatest()` 增量同步
-  - 回填完成后会立刻对所有启用守号做一次全量核对
-- **运行中**：`startScheduler()` 每 **30 分钟**自动调一次 `syncLatest()`
-  - 请求最近 20 期；中彩网接口当前会忽略 `pageSize` 返回其可提供的全量数据，
-    代码按 `code` 主键逐期 upsert，已存在的期会被刷新（官方有时会修正奖级金额）
-  - 模块级单例（`globalThis` 标记），多次 SSR / HMR 只启动一次
+- **启动**：服务启动 5 秒后做一次 catch-up；页面首次 SSR 也会触发，内部去重
+  - 库为空且未回填 → 回填约 2,000 期，一次性批量写入并结算
+  - 库里有数据 → 只比较最新期号；无新期直接返回，**不写 draws / hit_records / app_meta**
+- **运行中**：不再 30 分钟轮询
+  - 仅在开奖日（周二/四/日）21:35 检查一次
+  - 结果未出时每 30 分钟重试，最多 3 次
+  - 时区由 systemd 的 `TZ=Asia/Shanghai` 固定
+- **新期写入**：单事务 upsert 这一期 `draws` + 批量 upsert 该期 `hit_records`
+- **手动同步**：首页按钮 / `POST /api/sync`；无新期同样不写库
+- **奖级修正**：官方事后修正金额时，用首页“补录指定期”触发 `syncOne`，只重写该期
+- **连接池**：最多 3 个连接，90 秒无查询自动关闭，便于 TDSQL-C 空闲时降成本
+- **停止服务**：主动关闭连接，避免数据库侧残留长时间 Sleep 连接
+- **外部请求**：中彩网接口忽略 `pageSize`，每次检查仍会返回全量数据；但数据库只写新期
 
 > 早期版本用 `src/instrumentation.ts` + `experimental.instrumentationHook` 做启动入口，
-> 但 Next 14 会把 `better-sqlite3` 一并打进 edge bundle 导致 SSR 500，
-> 因此已改为首页懒启动，`src/instrumentation.ts` 已删除，不要重复添加。
+> 但 Next 14 会把数据库原生模块一并打进 edge bundle 导致 SSR 500，
+> 因此已改为首页/健康检查懒启动，`src/instrumentation.ts` 已删除，不要重复添加。
 
 手动同步：
 
-- 首页右上角 **"立即同步开奖"** 按钮立即触发一次 `syncLatest()`（请求最近 20 期，实际返回以接口为准）
-- API：`POST /api/sync`（无 body）
-
-如果想调整定时器频率，修改 `src/lib/sync/runner.ts` 中的 `SYNC_INTERVAL_MS`。
+- 首页右上角 **"立即同步开奖"** 按钮触发一次 `syncLatest()`（无新期不写库）
+- API：`POST /api/sync`（无 body）；补录指定期：`POST /api/sync` + `{"code":"2026120"}`
 
 ---
 
@@ -363,7 +404,10 @@ curl --fail http://127.0.0.1:3000/api/health
 ## 常见问题
 
 **Q: 启动后访问 :3000 报 500？**
-A: 多数是 `node_modules` 没装好。用 `./scripts/npm.sh ci` 重装，不要用宿主机 Node 直接 `npm install`。
+A: 先看 `journalctl -u lucky.service -n 50`。多数是 `node_modules` 没装好（用 `./scripts/npm.sh ci` 重装）或 `.env.local` 的 `DATABASE_URL` 不可用。
+
+**Q: 启动报缺少 DATABASE_URL / 连接数据库失败？**
+A: 检查 `.env.local` 是否存在、连接串格式是否正确、TDSQL-C 白名单是否放行本机 IP、端口是否可达。可用 `mysql -h 主机 -P 端口 -u 用户 -p` 先验证；不要把连接串提交到 Git。
 
 **Q: 同步失败 / fetch error？**
 A: 中彩网偶尔抽风，脚本会保留错误日志。也可手动在首页"补录指定期"输入期号回填。
@@ -374,23 +418,29 @@ A: 浮动奖级（1/2 等）的金额来自官方 `typemoney` 字段；个别期
 **Q: 为什么最早只有 2013 年的数据？**
 A: 中彩网当前接口只提供 2013 年至今的开奖记录（约 2,000 期）。更早的数据需要接入其它数据源，本工具未内置。
 
+**Q: 怎么从旧 SQLite 迁移？**
+A: 保留 `data/ssq.db`，配置好 `.env.local` 后执行 `./scripts/npm.sh run migrate:mysql`。脚本会建库建表、批量导入并校验行数与金额，可重复执行。
+
 **Q: 为什么项目里要单独放一个 Node？**
-A: `better-sqlite3` 是原生模块，ABI 与 Node 主版本绑定；项目用 `.runtime` 固定 Node 22，避免宿主机 Node 升级或切换导致构建/运行失败。`.runtime` 不提交 Git，删掉后重新执行 `./scripts/bootstrap-node.sh` 即可。
+A: 固定 Node 22 可以保证构建和运行使用同一 ABI/版本；迁移脚本仍用 `better-sqlite3` 读取旧库，原生模块对 Node 主版本敏感。`.runtime` 不提交 Git，删掉后重新执行 `./scripts/bootstrap-node.sh` 即可。
 
 **Q: 怎么升级项目内 Node？**
 A: 修改 `.node-version` → `./scripts/bootstrap-node.sh` → `./scripts/npm.sh rebuild better-sqlite3` → `./scripts/npm.sh run build` → 重启服务。
 
 **Q: 怎么重新部署？**
-A: `bash /opt/lucky/reinstall.sh`（或项目内 `./deploy.sh`）。会快进拉 `main`、准备 Node、装依赖、构建、重启并检查 `/api/health`；不会删除 `data/`。
+A: `bash /opt/lucky/reinstall.sh`（或项目内 `./deploy.sh`）。会快进拉 `main`、准备 Node、装依赖、构建、重启并检查 `/api/health`；不会删除 `data/`、`.runtime/`、`.env.local`。
 
 **Q: 修改守号后要不要重新同步？**
-A: 不需要。每次同步会重新计算所有启用守号与所有已入库期号。直接点"立即同步开奖"即可。
+A: 不需要。修改 `start_code` 会触发该守号重算；平时的开奖只会在新期写入时结算该期。
 
 **Q: 数据会被上传吗？**
-A: 不会。所有数据存在本地 `data/ssq.db`，本工具不联网传输你的守号/命中记录。
+A: 不会上传到第三方。数据保存在你自己的 TDSQL-C 实例，应用只连接 `.env.local` 中的 `DATABASE_URL`。
 
 **Q: 想清空重新开始？**
-A: `./start.sh reset`（需输入 `yes` 确认）。
+A: 数据在 MySQL，`./start.sh reset` 只打印说明。请用 MySQL 客户端手动清理 `hit_records`、`bets`、`draws`、`app_meta`（谨慎操作，先备份）。
+
+**Q: 按量付费，怎么控制成本？**
+A: 只在开奖日 21:35 检查，未出结果最多重试 3 次；没有新期时完全不写库；新期只写该期并批量写命中；连接池 90 秒无查询自动关闭。需要彻底暂停数据库时，可在腾讯云控制台暂停实例，注意先停服务。
 
 ---
 
@@ -398,14 +448,17 @@ A: `./start.sh reset`（需输入 `yes` 确认）。
 
 ```
 lucky/
+├── .env.example            # DATABASE_URL 模板（复制为 .env.local）
+├── .env.local              # 实际 MySQL 连接串（gitignore）
 ├── .node-version           # 固定的 Node 版本（22.23.2）
 ├── .runtime/               # 项目内 Node（bootstrap 生成，gitignore，约 200MB）
-├── data/                   # SQLite 数据（自动生成，gitignore）
+├── data/                   # 迁移前 SQLite 备份（gitignore）
 ├── logs/                   # 启动脚本的 PID/日志
 ├── scripts/
 │   ├── bootstrap-node.sh   # 下载/校验/解压 Node 到 .runtime
 │   ├── check-runtime.mjs   # npm install 前的 Node 主版本守卫
 │   ├── cron.mjs            # 可选：独立的外部轮询进程（默认不需要，定时同步已内置）
+│   ├── migrate-sqlite-to-mysql.ts  # 一次性迁移旧 SQLite 数据
 │   ├── npm.sh              # 用项目内 Node 运行项目内 npm
 │   └── run-next.mjs        # 优先用 .runtime/node 启动 Next
 ├── src/
@@ -428,11 +481,11 @@ lucky/
 │   └── lib/
 │       ├── engine/         # 投注展开 + 命中结算 + 奖级表（纯函数，可单测）
 │       ├── crawler/        # 中彩网爬取
-│       ├── db/             # SQLite 仓库
+│       ├── db/             # MySQL 数据访问（mysql2，连接池）
 │       └── sync/           # 守号↔引擎适配 + 同步执行（含 backfillHistory / startScheduler）
 ├── start.sh                # 一键启动脚本（开发模式）
 ├── deploy.sh               # 一键重新部署（拉取/构建/重启/健康检查）
-├── next.config.mjs         # Next.js 配置（better-sqlite3 走 Node 外部包）
+├── next.config.mjs         # Next.js 配置（mysql2 / better-sqlite3 走 Node 外部包）
 ├── package.json
 └── README.md
 ```
