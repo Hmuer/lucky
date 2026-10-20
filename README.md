@@ -14,6 +14,7 @@
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
 - [启动脚本](#启动脚本)
+- [systemd 服务（Linux）](#systemd-服务linux)
 - [页面与操作指南](#页面与操作指南)
 - [支持的玩法](#支持的玩法)
 - [奖级与金额规则](#奖级与金额规则)
@@ -89,14 +90,16 @@ npm install
 任选一种方式：
 
 ```bash
-# 方式 A：一键脚本（推荐，自动后台启动 + 就绪检测）
+# 方式 A：一键脚本（开发/临时运行，自动后台启动 + 就绪检测）
 ./start.sh
 
-# 方式 B：直接用 npm
+# 方式 B：直接用 npm（开发模式）
 npm run dev
 ```
 
 启动成功后访问：**http://localhost:3000**
+
+生产环境建议使用下面的 systemd 服务。systemd 直接托管前台进程，服务异常退出会自动重启，并可配置为开机自启。
 
 ### 4. 首次同步开奖数据
 
@@ -135,6 +138,40 @@ PID 文件：`logs/web.pid`
 > 老版本里的 `./start.sh all` / `all-fg` 已被移除。
 
 Windows 用户如果没有 bash，可以直接 `npm run dev`，功能等价。
+
+## systemd 服务（Linux）
+
+仓库内的 [`lucky.service`](lucky.service) 已按当前部署目录 `/opt/lucky/lucky` 配置，使用 `npm run start` 运行生产构建。首次安装或代码更新后，在项目目录执行：
+
+```bash
+# 确认依赖已安装并生成生产构建
+npm install
+npm run build
+
+# 安装服务单元
+sudo cp lucky.service /etc/systemd/system/lucky.service
+sudo systemctl daemon-reload
+
+# 立即启动，并设置为开机自动启动
+sudo systemctl enable --now lucky.service
+```
+
+检查运行状态和日志：
+
+```bash
+sudo systemctl status lucky.service
+sudo journalctl -u lucky.service -f
+```
+
+常用运维命令：
+
+```bash
+sudo systemctl restart lucky.service  # 更新代码并重新构建后执行
+sudo systemctl stop lucky.service
+sudo systemctl disable lucky.service  # 取消开机自启
+```
+
+如果项目目录或运行用户不同，请在复制服务文件前修改 `WorkingDirectory`、`User`、`Group`、`PATH` 和 `ExecStart`；`ExecStart` 必须指向该用户实际使用的 npm。服务运行期间产生的 SQLite 数据仍保存在 `data/ssq.db`，日志由 systemd journal 统一收集。
 
 ---
 

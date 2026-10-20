@@ -5,5 +5,6 @@ out/
 *.sqlite
 *.sqlite-journal
 data/
+logs/
 .DS_Store
 .env*.local
