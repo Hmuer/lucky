@@ -25,3 +25,38 @@
   gap: 10rpx;
   margin-top: 16rpx;
 }
+
+.range-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+
+.chip {
+  padding: 8rpx 22rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid #334155;
+  color: #94a3b8;
+  font-size: 22rpx;
+}
+
+.chip.on {
+  background: #eab308;
+  border-color: #eab308;
+  color: #111827;
+  font-weight: 600;
+}
+
+.trend-canvas {
+  width: 100%;
+  height: 400rpx;
+  margin-top: 16rpx;
+}
+
+.trend-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12rpx;
+}

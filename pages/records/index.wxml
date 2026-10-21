@@ -32,7 +32,7 @@
       <block wx:else>
         <view class="ball" wx:for="{{item.main}}" wx:for-item="num" wx:key="*this">{{num}}</view>
       </block>
-      <view class="ball special">{{item.special}}</view>
+      <view class="ball special" wx:for="{{item.special}}" wx:for-item="num" wx:key="*this">{{num}}</view>
     </view>
 
     <view class="row between meta">

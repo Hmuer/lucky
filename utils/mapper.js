@@ -1,10 +1,28 @@
 const format = require("./format");
+const trend = require("./trend");
 
 const TYPE_META = {
   single: { label: "基础", description: "6 个主数字 + 1 个特别数字" },
-  complex: { label: "组合", description: "6~20 个主数字 + 1 个特别数字" },
-  danTuo: { label: "核心组合", description: "1~5 个核心数字 + 扩展数字 + 1 个特别数字" }
+  complex: { label: "组合", description: "6~20 个主数字 + 1~16 个特别数字（可多选）" },
+  danTuo: {
+    label: "核心组合",
+    description: "1~5 个核心数字 + 扩展数字 + 1~16 个特别数字（可多选）"
+  }
 };
+
+/** 特别数字统一成升序去重数组，兼容单值写法 */
+function specialList(value) {
+  if (value === undefined || value === null || value === "") return [];
+  const raw = Array.isArray(value) ? value : [value];
+  const list = [];
+  raw.forEach(function (item) {
+    const n = Number(item);
+    if (Number.isInteger(n) && list.indexOf(n) < 0) list.push(n);
+  });
+  return list.sort(function (a, b) {
+    return a - b;
+  });
+}
 
 function typeLabel(type) {
   return (TYPE_META[type] || { label: "组合" }).label;
@@ -49,7 +67,7 @@ function levelItems(tierCounts) {
 
 function mapRecord(row) {
   const payload = row.payload || {};
-  const special = (payload.blue || [])[0];
+  const special = specialList(payload.blue);
   return {
     id: row.id,
     name: row.name,
@@ -59,7 +77,7 @@ function mapRecord(row) {
     main: payload.red || [],
     core: payload.redDan || [],
     extra: payload.redTuo || [],
-    special: special || null,
+    special: special,
     unitValue: format.centsToYuan(row.unitPrice),
     eachTime: !!row.buyEnabled,
     enabled: !!row.active,
@@ -120,6 +138,31 @@ function mapHistory(data) {
   });
 }
 
+/** 把历史核对整理成累计走势序列（只统计启用中的组合） */
+function mapTrend(data, activeIds) {
+  const items = (data && data.items) || [];
+  const picked = [];
+  items.forEach(function (item) {
+    const draw = item.draw || {};
+    if (!draw.code) return;
+    const hits = (item.hits || []).filter(function (hit) {
+      return !activeIds || activeIds[hit.betId];
+    });
+    if (!hits.length) return;
+    let cost = 0;
+    let win = 0;
+    hits.forEach(function (hit) {
+      cost += Number(hit.cost) || 0;
+      win += Number(hit.winAmount) || 0;
+    });
+    picked.push({ code: draw.code, date: draw.date || "", cost: cost, win: win });
+  });
+  picked.sort(function (a, b) {
+    return a.code < b.code ? -1 : a.code > b.code ? 1 : 0;
+  });
+  return trend.buildSeries(picked);
+}
+
 function mapStats(data) {
   const summary = (data && data.summary) || {};
   const rows = (data && data.bets) || [];
@@ -155,7 +198,7 @@ function mapRecordToForm(record) {
     name: record.name,
     type: record.type,
     main: (record.main || []).slice(),
-    special: record.special ? [record.special] : [],
+    special: specialList(record.special),
     core: (record.core || []).slice(),
     extra: (record.extra || []).slice(),
     unitValue: record.unitValue,
@@ -167,11 +210,11 @@ function mapRecordToForm(record) {
 }
 
 function toCreatePayload(form) {
-  const special = Array.isArray(form.special) ? form.special[0] : form.special;
+  const special = specialList(form.special);
   const payload =
     form.type === "danTuo"
-      ? { redDan: form.core, redTuo: form.extra, blue: [special] }
-      : { red: form.main, blue: [special] };
+      ? { redDan: form.core, redTuo: form.extra, blue: special }
+      : { red: form.main, blue: special };
   return {
     name: String(form.name || "").trim(),
     type: form.type,
@@ -186,6 +229,7 @@ function toCreatePayload(form) {
 
 module.exports = {
   TYPE_META,
+  specialList,
   typeLabel,
   typeDescription,
   matchesText,
@@ -194,6 +238,7 @@ module.exports = {
   mapHit,
   mapLatest,
   mapHistory,
+  mapTrend,
   mapStats,
   mapRecordToForm,
   toCreatePayload

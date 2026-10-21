@@ -6,6 +6,44 @@
   grid-template-columns: repeat(8, 1fr);
 }
 
+.special-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 12rpx;
+}
+
+.special-tip {
+  flex: 1;
+}
+
+.mini-btn {
+  padding: 8rpx 24rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid #334155;
+  color: #e5e7eb;
+  font-size: 22rpx;
+  margin-left: 12rpx;
+}
+
+.mini-btn:active {
+  opacity: 0.8;
+}
+
+.preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12rpx;
+}
+
+.preview-value {
+  color: #facc15;
+  font-size: 26rpx;
+  font-weight: 600;
+}
+
 .save {
   margin-top: 12rpx;
 }

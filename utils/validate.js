@@ -29,10 +29,11 @@ function validateForm(form) {
 
   if (form.type === "single") {
     if (main.length !== 6) return "基础组合需要 6 个主数字";
-    if (special.length !== 1) return "请选择 1 个特别数字";
+    if (special.length !== 1) return "基础组合需要 1 个特别数字";
   } else if (form.type === "complex") {
     if (main.length < 6 || main.length > 20) return "组合需要 6~20 个主数字";
-    if (special.length !== 1) return "请选择 1 个特别数字";
+    if (special.length < 1) return "请至少选择 1 个特别数字";
+    if (special.length > 16) return "特别数字最多 16 个";
   } else if (form.type === "danTuo") {
     if (core.length < 1 || core.length > 5) return "核心数字需要 1~5 个";
     const need = 6 - core.length;
@@ -42,7 +43,8 @@ function validateForm(form) {
       return extra.indexOf(n) >= 0;
     });
     if (overlap) return "核心数字和扩展数字不能重复";
-    if (special.length !== 1) return "请选择 1 个特别数字";
+    if (special.length < 1) return "请至少选择 1 个特别数字";
+    if (special.length > 16) return "特别数字最多 16 个";
   } else {
     return "类型错误";
   }

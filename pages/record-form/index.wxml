@@ -71,8 +71,17 @@
   <view class="card">
     <view class="row between">
       <view class="title">特别数字</view>
-      <view class="muted">已选 {{special.length}} / 1</view>
+      <view class="muted">已选 {{special.length}} / {{specialLimit}}</view>
     </view>
+
+    <view class="special-bar">
+      <view class="muted special-tip">{{specialTip}}</view>
+      <view wx:if="{{specialLimit > 1}}" class="row">
+        <view class="mini-btn" bindtap="selectAllSpecial">{{specialAll ? '取消全选' : '全选'}}</view>
+        <view wx:if="{{special.length}}" class="mini-btn" bindtap="clearSpecial">清空</view>
+      </view>
+    </view>
+
     <view class="grid special-grid">
       <view
         wx:for="{{specialCells}}"
@@ -95,6 +104,10 @@
     <view class="form-item">
       <view class="label">记录值（元 / 组）</view>
       <input class="input" type="digit" value="{{unitValue}}" bindinput="onUnit" />
+      <view class="preview">
+        <text class="muted">共 {{unitsText}}</text>
+        <text class="preview-value">¥{{amountText}} / 每期</text>
+      </view>
     </view>
 
     <view class="form-item">

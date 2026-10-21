@@ -39,6 +39,33 @@
       </view>
     </view>
 
+    <view class="card">
+      <view class="row between">
+        <view class="title">累计走势</view>
+        <view class="muted">共 {{trendCount}} 期</view>
+      </view>
+
+      <view class="range-chips">
+        <view
+          wx:for="{{ranges}}"
+          wx:key="key"
+          class="chip {{rangeKey === item.key ? 'on' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="setRange"
+        >
+          {{item.label}}
+        </view>
+      </view>
+
+      <canvas type="2d" id="trendCanvas" class="trend-canvas"></canvas>
+      <view wx:if="{{trendCount === 0}}" class="empty">该范围内暂无数据</view>
+
+      <view class="trend-meta">
+        <view class="muted">累计记录 ¥{{trendCostText}}</view>
+        <view class="muted">累计变化 <text class="{{trendChangeClass}}">{{trendChangeText}}</text></view>
+      </view>
+    </view>
+
     <view wx:if="{{stats.records.length === 0}}" class="card empty">还没有组合</view>
 
     <view wx:for="{{stats.records}}" wx:key="id" class="card">
