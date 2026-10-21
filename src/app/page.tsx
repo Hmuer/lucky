@@ -1,5 +1,4 @@
 import { Balls } from "@/components/Balls";
-import { SyncButton } from "@/components/SyncButton";
 import { getMeta, listBets, listHitsByDraw, latestDraw } from "@/lib/db";
 import { unstable_noStore as noStore } from "next/cache";
 
@@ -56,7 +55,6 @@ export default async function HomePage() {
       <div className="card p-6">
         <h1 className="text-lg font-semibold mb-2">还没有数据</h1>
         <p className="text-sm text-ink-100 mb-4">首次启动正在自动拉取中彩网历史开奖数据，请稍等几十秒到一两分钟，刷新页面即可。</p>
-        <SyncButton />
       </div>
     );
   }
@@ -98,7 +96,6 @@ export default async function HomePage() {
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
-            <SyncButton />
             {lastSync && <span className="text-xs text-ink-100">最近同步：{new Date(lastSync).toLocaleString()}</span>}
           </div>
         </div>

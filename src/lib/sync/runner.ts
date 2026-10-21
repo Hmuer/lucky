@@ -154,36 +154,6 @@ export async function syncLatest(): Promise<SyncReport> {
   }
 }
 
-/** 手动补录/修复指定期：始终重新写这一期及其命中 */
-export async function syncOne(code: string): Promise<SyncReport> {
-  const report: SyncReport = { fetched: 0, saved: 0, hits: 0, errors: [], skipped: false, newDraws: [] };
-  try {
-    const all = await fetchLatestDraws(100);
-    const r = all.find((x) => x.code === code);
-    if (!r) {
-      report.errors.push(`not found ${code}`);
-      return report;
-    }
-    report.fetched = 1;
-    const parsed = { ...parseDrawRow(r), fetched_at: Date.now() } as DrawRow;
-    const bets = await listBets(true, null);
-    const hits = buildHits([parsed], bets);
-
-    await withTransaction(async (conn) => {
-      await upsertDraws([parsed], conn);
-      await upsertHitRecords(hits, conn);
-    });
-
-    report.saved = 1;
-    report.hits = hits.length;
-    report.newDraws = [parsed.code];
-    await setMeta("last_sync_at", new Date().toISOString());
-  } catch (e: any) {
-    report.errors.push(e?.message ?? String(e));
-  }
-  return report;
-}
-
 /**
  * 启动时触发一次（best-effort，模块级去重）：
  * - 库为空且未回填过 → 拉全部历史期，批量入库并结算

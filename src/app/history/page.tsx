@@ -26,7 +26,7 @@ export default async function HistoryPage() {
         <p className="text-sm text-ink-100 mt-1">展示每一期开奖号码与各守号命中情况。</p>
       </div>
 
-      {draws.length === 0 && <div className="card p-6 text-sm text-ink-100">暂无数据，请先在首页点击「立即同步开奖」。</div>}
+      {draws.length === 0 && <div className="card p-6 text-sm text-ink-100">暂无数据，请稍后刷新；同步会自动进行。</div>}
 
       {draws.map((d) => {
         const rowHits = hitsByCode.get(d.code) ?? [];
