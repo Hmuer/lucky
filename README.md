@@ -35,6 +35,7 @@ node tests/check-static.js
 
 - 本目录只包含小程序客户端文件，服务端在其它分支/仓库。
 - 不包含任何服务端密钥或数据库连接串。
-- 登录 token 只保存在本机 Storage。
+- 登录态只保存在内存，冷启动自动重新登录；不写本地 Storage。
 - 界面统一使用中性表述，便于小程序审核。
 - 服务端协议字段只在 `utils/api.js` / `utils/mapper.js` 的适配层出现，页面状态和展示全部使用中性字段（如 main/special/value/change/matches）。
+- 自身不缓存任何业务数据；每次进入页面都从 API 获取最新数据。

@@ -1,19 +1,19 @@
-const config = require("../config");
+let memoryToken = "";
 
 function getToken() {
-  return wx.getStorageSync(config.TOKEN_KEY) || "";
+  return memoryToken;
 }
 
 function setToken(token) {
-  wx.setStorageSync(config.TOKEN_KEY, token);
+  memoryToken = token || "";
   const app = getApp();
   if (app && app.globalData) {
-    app.globalData.token = token;
+    app.globalData.token = memoryToken;
   }
 }
 
 function clearToken() {
-  wx.removeStorageSync(config.TOKEN_KEY);
+  memoryToken = "";
   const app = getApp();
   if (app && app.globalData) {
     app.globalData.token = "";

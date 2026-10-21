@@ -9,10 +9,16 @@ Page({
   onShow() {
     if (auth.getToken()) {
       wx.reLaunch({ url: "/pages/home/index" });
+      return;
     }
+    this.login();
   },
 
   start() {
+    this.login();
+  },
+
+  login() {
     if (this.data.loading) return;
     this.setData({ loading: true });
 

@@ -45,6 +45,10 @@ function walk(dir) {
       if (text.includes(word)) failures.push(rel + " 含敏感词: " + word);
     }
 
+    for (const api of ["getStorageSync", "setStorageSync", "wx.setStorage", "wx.getStorage"]) {
+      if (text.includes(api)) failures.push(rel + " 使用了本地存储: " + api);
+    }
+
     if (ext === ".json") {
       try {
         JSON.parse(text);
