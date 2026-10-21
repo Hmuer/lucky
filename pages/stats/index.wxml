@@ -104,4 +104,6 @@
       </view>
     </view>
   </block>
+
+  <ad-banner></ad-banner>
 </view>

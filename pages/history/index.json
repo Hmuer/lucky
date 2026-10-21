@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "历史记录"
+  "navigationBarTitleText": "历史记录",
+  "usingComponents": {
+    "ad-banner": "/components/ad-banner/index"
+  }
 }

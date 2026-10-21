@@ -281,4 +281,11 @@ test("历史核对映射为走势序列（只含启用组合、按期号升序�
   assert.strictEqual(series[1].cumWin, 500);
 });
 
+console.log("[6] 广告配置");
+const ad = require("../utils/ad");
+test("未配置广告位时不展示广告", () => {
+  assert.strictEqual(ad.bannerUnitId(), "");
+  assert.strictEqual(ad.interstitialUnitId(), "");
+});
+
 console.log("\n✅ " + passed + " 项测试通过");

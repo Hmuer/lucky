@@ -48,4 +48,6 @@
       </view>
     </view>
   </view>
+
+  <ad-banner></ad-banner>
 </view>

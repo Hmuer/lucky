@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "统计"
+  "navigationBarTitleText": "统计",
+  "usingComponents": {
+    "ad-banner": "/components/ad-banner/index"
+  }
 }

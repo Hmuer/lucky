@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "我的组合"
+  "navigationBarTitleText": "我的组合",
+  "usingComponents": {
+    "ad-banner": "/components/ad-banner/index"
+  }
 }

@@ -2,6 +2,7 @@ const api = require("../../utils/api");
 const auth = require("../../utils/auth");
 const mapper = require("../../utils/mapper");
 const subscribe = require("../../utils/subscribe");
+const ad = require("../../utils/ad");
 
 Page({
   data: {
@@ -12,6 +13,7 @@ Page({
 
   onShow() {
     if (!auth.ensureLogin()) return;
+    ad.showLaunchInterstitial();
     this.load();
   },
 

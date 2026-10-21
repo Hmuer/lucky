@@ -45,4 +45,6 @@
       <view class="btn btn-ghost danger" data-id="{{item.id}}" bindtap="remove">删除</view>
     </view>
   </view>
+
+  <ad-banner></ad-banner>
 </view>

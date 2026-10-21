@@ -1,0 +1,3 @@
+<view wx:if="{{unitId}}" class="ad-banner">
+  <ad unit-id="{{unitId}}" ad-type="banner" ad-theme="white" binderror="onError"></ad>
+</view>

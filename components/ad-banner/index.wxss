@@ -1,0 +1,5 @@
+.ad-banner {
+  margin-top: 20rpx;
+  border-radius: 20rpx;
+  overflow: hidden;
+}
