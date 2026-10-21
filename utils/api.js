@@ -66,10 +66,6 @@ function getStats() {
   return request("/stats", "GET");
 }
 
-function sync() {
-  return request("/sync", "POST", {});
-}
-
 function getSubscribeConfig() {
   return request("/subscribe-config", "GET");
 }
@@ -87,7 +83,6 @@ module.exports = {
   deleteRecord,
   getHistory,
   getStats,
-  sync,
   getSubscribeConfig,
   reportSubscription
 };

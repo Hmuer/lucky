@@ -33,24 +33,6 @@ Page({
       });
   },
 
-  sync() {
-    wx.showLoading({ title: "更新中" });
-    api
-      .sync()
-      .then((data) => {
-        wx.hideLoading();
-        wx.showToast({
-          title: data && data.saved > 0 ? "已更新" : "已是最新",
-          icon: "none"
-        });
-        this.load();
-      })
-      .catch((err) => {
-        wx.hideLoading();
-        wx.showToast({ title: (err && err.message) || "更新失败", icon: "none" });
-      });
-  },
-
   goRecords() {
     wx.navigateTo({ url: "/pages/records/index" });
   },

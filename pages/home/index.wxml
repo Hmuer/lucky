@@ -78,9 +78,6 @@
       </view>
       <view class="btn-row">
         <view class="btn btn-ghost" bindtap="goStats">统计</view>
-        <view class="btn btn-ghost" bindtap="sync">同步结果</view>
-      </view>
-      <view class="btn-row">
         <view class="btn btn-ghost" bindtap="notify">消息提醒</view>
       </view>
     </view>
