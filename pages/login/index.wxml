@@ -1,7 +1,7 @@
 <view class="login">
   <view class="brand">
     <view class="brand-mark">幸</view>
-    <view class="subtitle">幸运数字</view>
+    <view class="subtitle">守号管理</view>
     <view class="muted login-tip">记录你的数字组合</view>
   </view>
 

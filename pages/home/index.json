@@ -1,5 +1,5 @@
 {
-  "navigationBarTitleText": "幸运数字",
+  "navigationBarTitleText": "守号管理",
   "usingComponents": {
     "ad-banner": "/components/ad-banner/index"
   }

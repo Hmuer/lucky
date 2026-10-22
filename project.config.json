@@ -1,10 +1,14 @@
 {
-  "description": "幸运数字 - 个人数字组合记录",
+  "description": "守号管理 - 个人数字组合记录",
   "packOptions": {
     "ignore": [
       { "type": "folder", "value": "tests" },
+      { "type": "folder", "value": ".workbuddy" },
+      { "type": "folder", "value": ".workbuddy-ai" },
+      { "type": "folder", "value": ".git" },
       { "type": "file", "value": "README.md" },
-      { "type": "file", "value": "package.json" }
+      { "type": "file", "value": "package.json" },
+      { "type": "suffix", "value": ".genie" }
     ],
     "include": []
   },
@@ -20,8 +24,8 @@
   },
   "compileType": "miniprogram",
   "libVersion": "3.6.0",
-  "appid": "wxec72d527c8cc194f",
-  "projectname": "幸运数字",
+  "appid": "wxb24a8ea124604c1e",
+  "projectname": "守号管理",
   "miniprogramRoot": "./",
   "condition": {}
 }

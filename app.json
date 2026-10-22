@@ -8,7 +8,7 @@
     "pages/stats/index"
   ],
   "window": {
-    "navigationBarTitleText": "幸运数字",
+    "navigationBarTitleText": "守号管理",
     "navigationBarBackgroundColor": "#0b1220",
     "navigationBarTextStyle": "white",
     "backgroundColor": "#0b1220",

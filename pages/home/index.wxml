@@ -1,7 +1,7 @@
 <view class="page">
   <view class="row between home-head">
     <view>
-      <view class="subtitle">幸运数字</view>
+      <view class="subtitle">守号管理</view>
       <view class="muted">个人数字记录</view>
     </view>
     <view class="tag gold">最新结果</view>
