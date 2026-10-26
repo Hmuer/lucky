@@ -2,6 +2,8 @@
 Description=双色球守号监控 Web 服务
 Wants=network-online.target
 After=network-online.target
+# 连续崩溃也不放弃拉起；显式 systemctl stop 仍会保持停止
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -17,8 +19,9 @@ Environment=PATH=/opt/lucky/lucky/.runtime/node/bin:/usr/local/sbin:/usr/local/b
 ExecStart=/opt/lucky/lucky/scripts/npm.sh run start
 # 启动后触发一次健康检查，确保同步定时器启动；失败不阻塞服务
 ExecStartPost=-/usr/bin/curl -fsS --retry 5 --retry-delay 1 --retry-connrefused http://127.0.0.1:3000/api/health
-Restart=on-failure
-RestartSec=5
+# 正常/异常退出都自动拉起（systemctl stop 例外）
+Restart=always
+RestartSec=3
 TimeoutStopSec=30
 KillSignal=SIGINT
 

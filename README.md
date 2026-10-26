@@ -154,19 +154,24 @@ CREATE DATABASE lucky CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 ### 4. 启动 Web 服务
 
-任选一种方式：
+生产环境统一用 systemd，开机自启，异常退出自动拉起：
 
 ```bash
-# 方式 A：一键脚本（开发/临时运行，自动后台启动 + 就绪检测）
-./start.sh
+sudo systemctl enable --now lucky.service
+sudo systemctl status lucky.service
+```
 
-# 方式 B：直接用项目内 npm（开发模式）
+本地开发（前台运行，不经过 systemd）：
+
+```bash
 ./scripts/npm.sh run dev
+# 或 ./start.sh dev
 ```
 
 启动成功后访问：**http://localhost:3000**
 
-生产环境建议使用下面的 systemd 服务。systemd 直接托管前台进程，服务异常退出会自动重启，并可配置为开机自启。
+> 生产环境不要再用 `nohup`、`npm run start &` 或 `./start.sh` 的旧后台模式，
+> 统一由 `lucky.service` 托管，日志进 journald。
 
 ### 5. 首次同步开奖数据
 
@@ -189,25 +194,29 @@ CREATE DATABASE lucky CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 ---
 
-## 启动脚本
+## 启动与运维脚本
 
-`./start.sh` 是项目根目录的一键启动脚本，支持以下子命令：
+`./start.sh` 现在只是 **systemctl 的简写**，不再自己 `nohup` 启动进程；生产环境统一由 `lucky.service` 托管。
 
-| 命令 | 说明 |
+| 命令 | 实际执行 |
 |---|---|
-| `./start.sh` 或 `./start.sh start` | 后台启动 Web，访问 :3000 |
-| `./start.sh fg` | 前台启动 Web（Ctrl+C 退出） |
-| `./start.sh status` | 查看进程 / 日志 / 数据库状态 |
-| `./start.sh logs` | 跟踪 Web 日志（Ctrl+C 退出） |
-| `./start.sh stop` | 停止 Web 进程 |
+| `./start.sh` 或 `./start.sh start` | `systemctl start lucky.service`，随后显示状态 |
+| `./start.sh stop` | `systemctl stop lucky.service` |
+| `./start.sh restart` | `systemctl restart lucky.service` |
+| `./start.sh status` | `systemctl status lucky.service` |
+| `./start.sh logs` | `journalctl -u lucky.service -f` |
+| `./start.sh enable` | `systemctl enable --now lucky.service`（开机自启） |
+| `./start.sh disable` | `systemctl disable --now lucky.service` |
+| `./start.sh dev` | 本地开发模式，前台 `next dev`（需先停止 systemd，避免占用 :3000） |
 | `./start.sh test` | 跑引擎单测 |
 | `./start.sh reset` | 查看 MySQL 清理说明（不再删除数据库） |
 
-PID 文件：`logs/web.pid`（仅 `start.sh` 开发模式）
-日志文件：`logs/web.log`（仅 `start.sh` 开发模式，每次启动会重写）
+生产日志统一进 journald，不再使用 `logs/web.pid` / `logs/web.log`；请用：
 
-> `logs/web.log` 只对应 `next dev`。生产环境由 systemd 托管，日志统一进 journald，
-> 请用 `journalctl -u lucky.service -f` 查看，不要用开发日志排查线上问题。
+```bash
+./start.sh logs
+# 等价于 journalctl -u lucky.service -f
+```
 
 > 定时同步已内置在 Web 进程内（仅开奖日检查），无需额外启动 cron 进程。
 > 老版本里的 `./start.sh all` / `all-fg` 已被移除。
@@ -217,6 +226,13 @@ Windows 建议使用 WSL；原生 Windows 没有 bash 时，请手动安装 Node
 ## systemd 服务（Linux）
 
 仓库内的 [`lucky.service`](lucky.service) 已按当前部署目录 `/opt/lucky/lucky` 配置，通过 `./scripts/npm.sh` 使用项目内 Node 22 运行生产构建。首次安装或代码更新后，在项目目录执行：
+
+服务单元的重启策略：
+
+- `WantedBy=multi-user.target`：`systemctl enable` 后开机自启。
+- `Restart=always` + `RestartSec=3`：正常退出或异常退出都会在 3 秒后自动拉起。
+- `StartLimitIntervalSec=0`：连续崩溃也不限次数，避免 systemd 放弃重启。
+- `systemctl stop lucky.service`：显式停止时保持停止，不会自动拉起；`systemctl start` 恢复。
 
 ```bash
 # 1. 安装/更新项目内 Node（.node-version 变化时才会重新下载）
@@ -254,7 +270,11 @@ sudo journalctl -u lucky.service -f
 # 只重启
 sudo systemctl restart lucky.service
 sudo systemctl stop lucky.service
-sudo systemctl disable lucky.service  # 取消开机自启
+sudo systemctl disable lucky.service  # 取消开机自启，并停止服务
+
+# 确认开机自启和重启策略
+systemctl is-enabled lucky.service
+systemctl show lucky.service -p Restart -p RestartUSec -p UnitFileState
 ```
 
 如果项目目录或运行用户不同，请在复制服务文件前修改 `WorkingDirectory`、`User`、`Group`、`PATH` 和 `ExecStart`。`ExecStart` 指向项目内 `./scripts/npm.sh`，`PATH` 也把 `.runtime/node/bin` 放在最前，因此服务完全不依赖宿主机的 `node`/`npm`。`EnvironmentFile` 会读取项目内 `.env.local` 的 `DATABASE_URL`；业务数据保存在 TDSQL-C，日志由 systemd journal 统一收集。
@@ -284,7 +304,7 @@ cd /path/to/lucky
 4. `./scripts/bootstrap-node.sh`（版本未变会跳过下载）
 5. `./scripts/npm.sh ci`
 6. `./scripts/npm.sh run build`
-7. 同步 `lucky.service` 到 `/etc/systemd/system/` 并重启
+7. 同步 `lucky.service` 到 `/etc/systemd/system/`，确保开机自启并重启
 8. 轮询 `/api/health`，失败时打印 `systemctl status` 与 `journalctl`
 
 > 不会删除 `data/`、`.runtime/`、`logs/`、`.env.local`，脚本里没有 `rm -rf`；`git pull` 也不会覆盖这些 gitignore 文件。业务数据在 TDSQL-C，部署不会清库。部署脚本要求以 root 运行。
@@ -298,6 +318,7 @@ git pull --ff-only origin main
 ./scripts/npm.sh run build
 sudo cp lucky.service /etc/systemd/system/lucky.service
 sudo systemctl daemon-reload
+sudo systemctl enable lucky.service
 sudo systemctl restart lucky.service
 curl --fail http://127.0.0.1:3000/api/health
 ```
@@ -587,7 +608,8 @@ lucky/
 │       ├── db/             # MySQL 数据访问（mysql2，连接池，user_id 隔离）
 │       ├── sync/           # 同步执行 + 21:30 定时器
 │       └── wx/             # 微信登录、JWT、access_token、订阅推送
-├── start.sh                # 一键启动脚本（开发模式）
+├── start.sh                # systemctl 简写；dev 为本地开发入口
+├── lucky.service           # systemd 单元（开机自启、异常退出自动拉起）
 ├── deploy.sh               # 一键重新部署（拉取/构建/重启/健康检查）
 ├── next.config.mjs         # Next.js 配置（mysql2 / better-sqlite3 走 Node 外部包）
 ├── package.json

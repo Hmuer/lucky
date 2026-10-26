@@ -53,6 +53,8 @@ if ! cmp -s "$PROJECT_DIR/lucky.service" "$UNIT_PATH"; then
   install -m 0644 "$PROJECT_DIR/lucky.service" "$UNIT_PATH"
   systemctl daemon-reload
 fi
+# 每次部署都确保开机自启，避免新机器上只 restart 没 enable
+systemctl enable "$SERVICE_NAME" >/dev/null
 systemctl restart "$SERVICE_NAME"
 
 echo "[6/6] 健康检查 ..."

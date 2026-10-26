@@ -1,173 +1,111 @@
 #!/usr/bin/env bash
-# 双色球守号监控 - 一键启动（仅开发模式）
-# 生产环境请使用 systemd 的 lucky.service，日志走 journald。
-# 首次使用：./scripts/bootstrap-node.sh
-# 用法：
-#   ./start.sh           # 启动 Web（默认后台）。进程内自带定时同步，无需额外 cron。
-#   ./start.sh fg        # 前台运行 Web
-#   ./start.sh stop      # 停止 Web
-#   ./start.sh status    # 查看状态
-#   ./start.sh test      # 跑引擎单测
-#   ./start.sh logs      # 跟踪日志
-#   ./start.sh reset     # 说明：数据在 MySQL，不再删除本地库
-#
-# 开发日志：./logs/web.log（仅 next dev）
+# 生产环境统一由 systemd 管理，本脚本只是 systemctl 的简写。
+# 服务单元：lucky.service
 # 生产日志：journalctl -u lucky.service -f
-# PID：./logs/web.pid
-
-set -e
+#
+# 用法：
+#   ./start.sh                 启动并查看状态（systemctl start）
+#   ./start.sh stop            停止
+#   ./start.sh restart         重启
+#   ./start.sh status          查看状态
+#   ./start.sh logs            跟踪 journald 日志
+#   ./start.sh enable          设置开机自启并立即启动
+#   ./start.sh disable         取消开机自启并停止
+#   ./start.sh dev             本地开发模式（前台 next dev，需先停 systemd）
+#   ./start.sh test            跑引擎单测
+#   ./start.sh reset           查看 MySQL 清理说明
+#
+# 生产启动/停止请不要再用 nohup 或后台 npm，统一走 systemd。
+set -euo pipefail
 
 cd "$(dirname "$0")"
-ROOT="$(pwd)"
-LOGS="$ROOT/logs"
-mkdir -p "$LOGS"
+SERVICE="${SERVICE_NAME:-lucky.service}"
 
-WEB_PID="$LOGS/web.pid"
-WEB_LOG="$LOGS/web.log"
-RUNTIME_NODE="$ROOT/.runtime/node/bin/node"
-RUNTIME_NPM="$ROOT/scripts/npm.sh"
+if ! command -v systemctl >/dev/null 2>&1; then
+  echo "未找到 systemctl；本脚本用于 Linux systemd 环境，开发请用：./scripts/npm.sh run dev" >&2
+  exit 1
+fi
 
-color() { printf "\033[1;%sm%s\033[0m\n" "$1" "$2"; }
-info()  { color 36 "[i] $*"; }
-ok()    { color 32 "[✔] $*"; }
-warn()  { color 33 "[!] $*"; }
-err()   { color 31 "[✘] $*"; }
-
-need_runtime() {
-  if [ ! -x "$RUNTIME_NODE" ]; then
-    err "未安装项目内 Node 运行时：$RUNTIME_NODE"
-    info "请先执行：./scripts/bootstrap-node.sh"
-    return 1
-  fi
-}
-
-need_deps() {
-  need_runtime
-  if [ ! -d node_modules ]; then
-    info "安装依赖（首次运行，可能需要 1~3 分钟）..."
-    "$RUNTIME_NPM" ci --no-audit --no-fund --loglevel=error
-    ok "依赖安装完成"
-  fi
-}
-
-is_running() {
-  local pidfile="$1"
-  [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null
-}
-
-start_web() {
-  if is_running "$WEB_PID"; then
-    warn "Web 已在运行 (pid $(cat "$WEB_PID"))，端口 :3000"
-    return 0
-  fi
-  need_deps
-  info "启动 Web 服务 → :3000 (后台，开发模式)"
-  {
-    echo "===== $(date '+%F %T') next dev 启动（仅开发模式） ====="
-    echo "===== 生产日志请用：journalctl -u lucky.service -f ====="
-  } > "$WEB_LOG"
-  nohup "$RUNTIME_NODE" scripts/run-next.mjs dev -H 127.0.0.1 -p 3000 >> "$WEB_LOG" 2>&1 &
-  echo $! > "$WEB_PID"
-  # 等就绪
-  for i in $(seq 1 30); do
-    if curl -sS -o /dev/null -m 1 http://localhost:3000 2>/dev/null; then
-      ok "Web 已就绪 (pid $(cat "$WEB_PID"))"
-      info "打开 http://localhost:3000"
-      return 0
-    fi
-    sleep 0.5
-  done
-  warn "Web 启动超时，查看日志: tail -n 100 $WEB_LOG"
-}
-
-stop_one() {
-  local name="$1" pidfile="$2"
-  if is_running "$pidfile"; then
-    local pid; pid="$(cat "$pidfile")"
-    kill "$pid" 2>/dev/null || true
-    sleep 0.5
-    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
-    rm -f "$pidfile"
-    ok "已停止 $name (pid $pid)"
+run_systemctl() {
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl "$@"
   else
-    warn "$name 未运行"
-    rm -f "$pidfile"
+    sudo systemctl "$@"
   fi
 }
 
-status() {
-  echo "--- 进程状态 ---"
-  if is_running "$WEB_PID"; then
-    ok "Web   运行中 (pid $(cat "$WEB_PID")) : http://localhost:3000"
-  elif curl -sS -o /dev/null -m 1 http://127.0.0.1:3000 2>/dev/null; then
-    warn "Web   未由 start.sh 托管，但 :3000 可访问（可能由 systemd 的 lucky.service 运行）"
-    info "生产状态：systemctl status lucky.service"
-    info "生产日志：journalctl -u lucky.service -f"
+run_journalctl() {
+  if [ "$(id -u)" -eq 0 ]; then
+    journalctl "$@"
   else
-    warn "Web   未运行"
+    sudo journalctl "$@"
   fi
-  echo
-  echo "--- 数据 ---"
-  echo "DB: MySQL（连接串见 .env.local 的 DATABASE_URL）"
-  [ -f .env.local ] && echo "配置: .env.local" || warn "缺少 .env.local，Web 将无法连接数据库"
-  [ -f data/ssq.db ] && echo "SQLite 备份: data/ssq.db ($(du -h data/ssq.db | awk '{print $1}'))" || true
-  [ -f "$WEB_LOG" ] && echo "开发日志: $WEB_LOG ($(wc -l < "$WEB_LOG") 行)" || true
-  echo "生产日志: journalctl -u lucky.service -f"
 }
 
-case "${1:-}" in
-  fg)
-    need_deps
-    info "前台启动 Web（Ctrl+C 退出）"
-    exec "$RUNTIME_NODE" scripts/run-next.mjs dev -H 127.0.0.1 -p 3000
-    ;;
-  all)
-    warn "all 模式已被移除：定时同步已内置在 Web 进程内（每 30 分钟一次），"
-    warn "直接 ./start.sh 即可。如果确实需要独立轮询，可手动跑 node scripts/cron.mjs"
-    start_web
-    echo
-    status
-    ;;
-  all-fg|allfg)
-    warn "all-fg 已被移除：定时同步已内置在 Web 进程内，直接 ./start.sh fg 即可。"
-    need_deps
-    exec "$RUNTIME_NODE" scripts/run-next.mjs dev -H 127.0.0.1 -p 3000
+usage() {
+  cat <<'EOF'
+用法: ./start.sh [start|stop|restart|status|logs|enable|disable|dev|test|reset]
+
+  start      启动 systemd 服务并查看状态（默认）
+  stop       停止服务
+  restart    重启服务
+  status     查看服务状态
+  logs       跟踪 journald 日志
+  enable     设置开机自启并立即启动
+  disable    取消开机自启并停止
+  dev        本地开发模式（前台 next dev）
+  test       跑引擎单测
+  reset      查看 MySQL 清理说明
+EOF
+}
+
+case "${1:-start}" in
+  start)
+    run_systemctl start "$SERVICE"
+    run_systemctl status --no-pager "$SERVICE"
     ;;
   stop)
-    stop_one "Web"  "$WEB_PID"
+    run_systemctl stop "$SERVICE"
+    ;;
+  restart)
+    run_systemctl restart "$SERVICE"
     ;;
   status)
-    status
-    ;;
-  test)
-    need_deps
-    info "运行引擎单测"
-    "$RUNTIME_NPM" run test:engine
+    run_systemctl status --no-pager "$SERVICE"
     ;;
   logs)
-    if [ ! -f "$WEB_LOG" ]; then
-      warn "没有开发日志：$WEB_LOG"
-      info "如果服务由 systemd 运行，请用：journalctl -u lucky.service -f"
-      exit 0
+    run_journalctl -u "$SERVICE" -f
+    ;;
+  enable)
+    run_systemctl enable --now "$SERVICE"
+    ;;
+  disable)
+    run_systemctl disable --now "$SERVICE"
+    ;;
+  dev|fg)
+    if run_systemctl is-active --quiet "$SERVICE"; then
+      echo "systemd 服务 $SERVICE 正在占用 :3000，请先执行：./start.sh stop" >&2
+      exit 1
     fi
-    info "跟踪开发日志（Ctrl+C 退出）"
-    tail -n 100 -f "$WEB_LOG"
+    exec ./scripts/npm.sh run dev
+    ;;
+  test)
+    exec ./scripts/npm.sh run test:engine
     ;;
   reset)
-    warn "数据已迁移到 TDSQL-C MySQL，start.sh reset 不再删除数据库。"
-    info "旧 SQLite 已归档到项目外（本部署为 /opt/lucky/backups/），项目内 data/ 为空。"
-    info "如需清空线上数据，请用 MySQL 客户端连接 DATABASE_URL 后手动操作（谨慎）。"
+    echo "数据在 TDSQL-C MySQL，start.sh reset 不再删除数据库。"
+    echo "旧 SQLite 已归档到项目外（本部署为 /opt/lucky/backups/），项目内 data/ 为空。"
+    echo "如需清空线上数据，请用 MySQL 客户端连接 DATABASE_URL 后手动操作（谨慎）。"
     ;;
-  ""|start)
-    start_web
-    echo
-    status
-    echo
-    info "其它命令：./start.sh stop / status / logs / test / reset"
+  all|all-fg|allfg)
+    echo "all 模式已移除：生产用 ./start.sh（systemd），开发用 ./start.sh dev。" >&2
+    exit 1
+    ;;
+  help|-h|--help)
+    usage
     ;;
   *)
-    err "未知命令: $1"
-    echo "用法: $0 [start|fg|stop|status|logs|test|reset]"
+    usage >&2
     exit 1
     ;;
 esac
