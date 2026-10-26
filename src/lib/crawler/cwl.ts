@@ -3,7 +3,7 @@
  * 接口：GET https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&pageNo=1&pageSize=N
  * 特点：
  *   - 纯 JSON，无需登录/cookie
- *   - 默认排序升序（旧→新），取最新用 pageSize=1 或自己反转
+ *   - 实测按最新在前返回（2026122, 2026121, ...），这里统一按 code 降序
  *   - typemoney 含中文说明（如"7500000（含加奖2500000）"），需正则提取首个数字
  */
 
@@ -40,7 +40,8 @@ export async function fetchLatestDraws(pageSize = 10): Promise<CrawlRawDraw[]> {
   if (!r.ok) throw new Error(`cwl http ${r.status}`);
   const j = (await r.json()) as ApiResp;
   if (j.state !== 0 || !j.result) throw new Error(`cwl state=${j.state} msg=${j.message}`);
-  return j.result.slice().reverse(); // 倒序：最新在前
+  // 不依赖接口顺序：显式按期号降序，保证 rows[0] 是最新一期。
+  return j.result.slice().sort((a, b) => b.code.localeCompare(a.code));
 }
 
 export async function fetchDrawByCode(code: string): Promise<CrawlRawDraw | null> {
