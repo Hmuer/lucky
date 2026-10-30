@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { Balls } from "@/components/Balls";
 
 type Type = "single" | "complex" | "danTuo";
 
@@ -264,6 +265,49 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
     return `胆${p.redDan.length} + 拖${p.redTuo.length} × ${p.blue.length}蓝（${countUnits(b.type, p)} 注）`;
   };
 
+  /** 一行号码：标签 + 小球；胆拖用不同标签区分胆/拖/蓝 */
+  const NumberLine = ({ label, red = [], blue = [] }: { label: string; red?: number[]; blue?: number[] }) => {
+    const clean = (xs: number[]) => Array.from(new Set(xs)).sort((a, b) => a - b);
+    const r = clean(red);
+    const bl = clean(blue);
+    if (!r.length && !bl.length) return null;
+    return (
+      <div className="flex items-start gap-1.5">
+        <span className={`w-4 shrink-0 pt-1 text-[10px] font-semibold ${label === "蓝" ? "text-sky-300" : "text-rose-300"}`}>{label}</span>
+        <Balls red={r} blue={bl} size={7} />
+      </div>
+    );
+  };
+
+  /** 已有守号直接展示实际选中的号码，而不是只显示“几红几蓝” */
+  const BetNumbers = ({ bet }: { bet: Bet }) => {
+    const p = bet.payload ?? {};
+    const red = Array.isArray(p.red) ? p.red : [];
+    const blue = Array.isArray(p.blue) ? p.blue : [];
+    const dan = Array.isArray(p.redDan) ? p.redDan : [];
+    const tuo = Array.isArray(p.redTuo) ? p.redTuo : [];
+    const empty = !red.length && !blue.length && !dan.length && !tuo.length;
+    return (
+      <div className="space-y-1">
+        {empty ? (
+          <span className="text-xs text-ink-200">未选号</span>
+        ) : bet.type === "danTuo" ? (
+          <>
+            <NumberLine label="胆" red={dan} />
+            <NumberLine label="拖" red={tuo} />
+            <NumberLine label="蓝" blue={blue} />
+          </>
+        ) : (
+          <>
+            <NumberLine label="红" red={red} />
+            <NumberLine label="蓝" blue={blue} />
+          </>
+        )}
+        {!empty && <div className="text-[10px] text-ink-200">{summarize(bet)}</div>}
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="card p-6">
@@ -384,6 +428,7 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
 
       <div className="card p-6">
         <h2 className="font-semibold mb-3">已有守号</h2>
+        <p className="text-xs text-ink-200 mb-3">号码列直接展示已选球；胆拖分别标注“胆 / 拖 / 蓝”。</p>
         {list.length === 0 ? (
           <div className="text-sm text-ink-100">暂无。</div>
         ) : (
@@ -395,7 +440,7 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                   <tr>
                     <th>名称</th>
                     <th>类型</th>
-                    <th>号码</th>
+                    <th>已选号码</th>
                     <th>开始期</th>
                     <th>每期金额</th>
                     <th>每期是否购买</th>
@@ -428,7 +473,9 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                           )}
                         </td>
                         <td>{b.type === "single" ? "单式" : b.type === "complex" ? "复式" : "胆拖"}</td>
-                        <td className="font-mono text-xs">{summarize(b)}</td>
+                        <td className="align-top min-w-[240px]">
+                          <BetNumbers bet={b} />
+                        </td>
                         <td className="font-mono text-xs">
                           {editingId === b.id ? (
                             <input className="input py-1 px-2 w-24" value={editStart} onChange={(e) => setEditStart(e.target.value)} placeholder="留空=全部" />
@@ -489,7 +536,7 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                       <div className="min-w-0">
                         <div className="font-medium truncate">{b.name}</div>
                         <div className="text-[11px] text-ink-200 mt-0.5">
-                          {b.type === "single" ? "单式" : b.type === "complex" ? "复式" : "胆拖"} · {summarize(b)}
+                          {b.type === "single" ? "单式" : b.type === "complex" ? "复式" : "胆拖"}
                         </div>
                       </div>
                       <div className="flex flex-col gap-1.5 shrink-0">
@@ -507,6 +554,11 @@ export function BetsEditor({ initial, defaultStartCode }: EditorProps) {
                           onChange={() => toggle(b, "active")}
                         />
                       </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-[10px] text-ink-200 mb-1">已选号码</div>
+                      <BetNumbers bet={b} />
                     </div>
 
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-3 text-xs">
