@@ -81,7 +81,7 @@ test("核心组合核心与扩展重复", () => {
   const form = Object.assign({}, danTuoBase, { extra: [1, 2, 3, 4, 5] });
   assert.ok(validate.validateForm(form).indexOf("不能重复") >= 0);
 });
-test("指定编号必须 7 位", () => {
+test("指定期号必须 7 位", () => {
   const form = Object.assign({}, base, { startMode: "custom", startCode: "123" });
   assert.ok(validate.validateForm(form).indexOf("7 位") >= 0);
 });

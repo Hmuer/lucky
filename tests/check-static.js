@@ -20,12 +20,16 @@ const PROHIBITED = [
   "\u80c6\u62d6",
   "\u590d\u5f0f",
   "\u5355\u5f0f",
-  "\u671f\u53f7",
   "\u5956\u6c60",
   "\u9500\u552e\u989d"
 ];
 
+// 「期号」是产品已确定的正式术语（用户要求把"编号"统一为"期号"），
+// 但它本身属于彩票常用词，保留为提示项：不阻断构建，只在检查结果里列出，提醒提审时留意。
+const RISKY = ["\u671f\u53f7"];
+
 const failures = [];
+const warnings = [];
 
 function walk(dir) {
   for (const name of fs.readdirSync(dir)) {
@@ -45,6 +49,10 @@ function walk(dir) {
 
     for (const word of PROHIBITED) {
       if (checked.includes(word)) failures.push(rel + " 含敏感词: " + word);
+    }
+
+    for (const word of RISKY) {
+      if (checked.includes(word)) warnings.push(rel + " 含提示词: " + word);
     }
 
     for (const api of ["getStorageSync", "setStorageSync", "wx.setStorage", "wx.getStorage"]) {
@@ -70,6 +78,11 @@ function walk(dir) {
 }
 
 walk(ROOT);
+
+if (warnings.length) {
+  console.warn("⚠️ 以下是提审时需留意的用词（不阻断构建）：");
+  for (const item of warnings) console.warn("  - " + item);
+}
 
 if (failures.length) {
   console.error("❌ 静态检查失败：");

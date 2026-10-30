@@ -111,7 +111,7 @@
     </view>
 
     <view class="form-item">
-      <view class="label">起始编号</view>
+      <view class="label">起始期号</view>
       <view class="seg">
         <view class="seg-item {{startMode === 'next' ? 'on' : ''}}" data-mode="next" bindtap="setStartMode">下一期</view>
         <view class="seg-item {{startMode === 'custom' ? 'on' : ''}}" data-mode="custom" bindtap="setStartMode">指定</view>
@@ -123,7 +123,7 @@
         type="number"
         maxlength="7"
         value="{{startCode}}"
-        placeholder="7 位数字编号"
+        placeholder="7 位数字期号"
         bindinput="onStartCode"
       />
     </view>

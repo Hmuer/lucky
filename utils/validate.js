@@ -55,7 +55,7 @@ function validateForm(form) {
   if (!inRange(special, RANGES.special[0], RANGES.special[1])) return "特别数字超出范围";
 
   if (form.startMode === "custom" && !/^\d{7}$/.test(String(form.startCode || ""))) {
-    return "起始编号需为 7 位数字";
+    return "起始期号需为 7 位数字";
   }
 
   return "";

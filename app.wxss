@@ -97,20 +97,23 @@ page {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #1e293b;
-  color: #f8fafc;
+  background: #dc2626;
+  color: #ffffff;
   font-size: 26rpx;
   font-weight: 600;
+  border: 2rpx solid transparent;
+  box-sizing: border-box;
 }
 
 .ball.special {
-  background: #0ea5e9;
+  background: #1d5fd0;
   color: #ffffff;
 }
 
 .ball.light {
-  background: #eab308;
-  color: #111827;
+  background: #dc2626;
+  color: #ffe9a8;
+  border-color: #fbbf24;
 }
 
 .grid {
@@ -133,15 +136,15 @@ page {
 }
 
 .num.active {
-  background: #eab308;
-  color: #111827;
-  border-color: #eab308;
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #dc2626;
   font-weight: 700;
 }
 
 .num.special.active {
-  background: #0ea5e9;
-  border-color: #0ea5e9;
+  background: #1d5fd0;
+  border-color: #1d5fd0;
   color: #ffffff;
 }
 

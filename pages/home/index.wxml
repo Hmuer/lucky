@@ -20,7 +20,7 @@
     <view class="card">
       <view class="row between">
         <view>
-          <view class="muted">结果编号</view>
+          <view class="muted">结果期号</view>
           <view class="value code">{{latest.code}}</view>
         </view>
         <view class="muted">{{latest.date}}</view>

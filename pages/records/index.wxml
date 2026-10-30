@@ -36,7 +36,7 @@
     </view>
 
     <view class="row between meta">
-      <view class="muted">起始编号：{{item.startCode || '自动'}}</view>
+      <view class="muted">起始期号：{{item.startCode || '自动'}}</view>
       <view class="muted">{{item.eachTime ? '每次参与' : '暂不参与'}}</view>
     </view>
 

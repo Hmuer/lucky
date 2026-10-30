@@ -2,13 +2,34 @@
   "description": "守号管理 - 个人数字组合记录",
   "packOptions": {
     "ignore": [
-      { "type": "folder", "value": "tests" },
-      { "type": "folder", "value": ".workbuddy" },
-      { "type": "folder", "value": ".workbuddy-ai" },
-      { "type": "folder", "value": ".git" },
-      { "type": "file", "value": "README.md" },
-      { "type": "file", "value": "package.json" },
-      { "type": "suffix", "value": ".genie" }
+      {
+        "type": "folder",
+        "value": "tests"
+      },
+      {
+        "type": "folder",
+        "value": ".workbuddy"
+      },
+      {
+        "type": "folder",
+        "value": ".workbuddy-ai"
+      },
+      {
+        "type": "folder",
+        "value": ".git"
+      },
+      {
+        "type": "file",
+        "value": "README.md"
+      },
+      {
+        "type": "file",
+        "value": "package.json"
+      },
+      {
+        "type": "suffix",
+        "value": ".genie"
+      }
     ],
     "include": []
   },

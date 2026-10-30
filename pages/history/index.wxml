@@ -1,7 +1,7 @@
 <view class="page">
   <view class="head">
     <view class="subtitle">历史记录</view>
-    <view class="muted">按编号倒序</view>
+    <view class="muted">按期号倒序</view>
   </view>
 
   <view wx:if="{{loading}}" class="card empty">加载中…</view>
@@ -11,7 +11,7 @@
   <view wx:for="{{items}}" wx:key="code" class="card">
     <view class="row between">
       <view>
-        <view class="muted">结果编号</view>
+        <view class="muted">结果期号</view>
         <view class="value code">{{item.code}}</view>
       </view>
       <view class="muted">{{item.date}}</view>
