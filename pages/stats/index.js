@@ -22,6 +22,7 @@ Page({
     rangeKey: "3m",
     trendCount: 0,
     trendCostText: "0.00",
+    trendWinText: "0.00",
     trendChangeText: "0.00",
     trendChangeClass: ""
   },
@@ -68,6 +69,7 @@ Page({
       {
         trendCount: summary.count,
         trendCostText: (summary.cost / 100).toFixed(2),
+        trendWinText: (summary.win / 100).toFixed(2),
         trendChangeText: (change > 0 ? "+" : "") + (change / 100).toFixed(2),
         trendChangeClass: change > 0 ? "change-up" : change < 0 ? "change-down" : ""
       },

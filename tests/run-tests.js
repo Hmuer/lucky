@@ -159,7 +159,9 @@ test("最新结果映射", () => {
   assert.strictEqual(latest.records.length, 1);
   assert.strictEqual(latest.records[0].matchesText, "6 级 ×1");
   assert.strictEqual(latest.records[0].changeText, "+3.00");
+  assert.strictEqual(latest.records[0].winText, "5.00");
   assert.strictEqual(latest.summary.valueText, "2.00");
+  assert.strictEqual(latest.summary.winText, "5.00");
 });
 test("统计映射", () => {
   const stats = mapper.mapStats({
@@ -181,8 +183,18 @@ test("统计映射", () => {
   });
   assert.strictEqual(stats.summary.periods, 10);
   assert.strictEqual(stats.summary.changeText, "-15.00");
+  assert.strictEqual(stats.summary.winText, "5.00");
   assert.strictEqual(stats.summary.levels[0].label, "6 级");
   assert.strictEqual(stats.records[0].bestText, "¥5.00");
+  assert.strictEqual(stats.records[0].winText, "5.00");
+});
+test("回补缺省时按记录加变化兜底", () => {
+  const stats = mapper.mapStats({
+    summary: { periods: 1, cost: 200, profit: -200 },
+    bets: [{ betId: 1, name: "X", type: "single", cost: 200, profit: 300 }]
+  });
+  assert.strictEqual(stats.summary.winText, "0.00");
+  assert.strictEqual(stats.records[0].winText, "5.00");
 });
 test("基础组合提交字段", () => {
   const payload = mapper.toCreatePayload(base);

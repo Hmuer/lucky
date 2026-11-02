@@ -23,6 +23,10 @@
           <view class="value">¥{{stats.summary.valueText}}</view>
         </view>
         <view class="stat">
+          <view class="muted">累计回补</view>
+          <view class="value">¥{{stats.summary.winText}}</view>
+        </view>
+        <view class="stat">
           <view class="muted">累计变化</view>
           <view class="value {{stats.summary.changeClass}}">{{stats.summary.changeText}}</view>
         </view>
@@ -62,6 +66,7 @@
 
       <view class="trend-meta">
         <view class="muted">累计记录 ¥{{trendCostText}}</view>
+        <view class="muted">累计回补 ¥{{trendWinText}}</view>
         <view class="muted">累计变化 <text class="{{trendChangeClass}}">{{trendChangeText}}</text></view>
       </view>
     </view>
@@ -89,6 +94,10 @@
         <view class="stat">
           <view class="muted">累计记录</view>
           <view class="value">¥{{item.valueText}}</view>
+        </view>
+        <view class="stat">
+          <view class="muted">累计回补</view>
+          <view class="value">¥{{item.winText}}</view>
         </view>
         <view class="stat">
           <view class="muted">单次最高</view>

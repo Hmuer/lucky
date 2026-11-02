@@ -36,14 +36,14 @@
       </view>
       <view class="row between hit-line">
         <view class="muted">{{record.matchesText}}</view>
-        <view class="muted">记录 ¥{{record.valueText}}</view>
+        <view class="muted">记录 ¥{{record.valueText}} · 回补 ¥{{record.winText}}</view>
       </view>
     </view>
 
     <view class="row between total">
       <view class="muted">合计</view>
       <view class="row">
-        <view class="muted">记录 ¥{{item.summary.valueText}}</view>
+        <view class="muted">记录 ¥{{item.summary.valueText}} · 回补 ¥{{item.summary.winText}}</view>
         <view class="value {{item.summary.changeClass}} summary-change">{{item.summary.changeText}}</view>
       </view>
     </view>

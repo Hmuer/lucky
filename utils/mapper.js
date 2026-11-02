@@ -65,6 +65,15 @@ function levelItems(tierCounts) {
     });
 }
 
+/** 回补金额（分）：服务端给 winAmount 就直接用，缺省时按 记录 + 变化 兜底 */
+function winAmountOf(source) {
+  if (!source) return 0;
+  if (source.winAmount !== undefined && source.winAmount !== null) {
+    return Number(source.winAmount) || 0;
+  }
+  return (Number(source.cost) || 0) + (Number(source.profit) || 0);
+}
+
 function mapRecord(row) {
   const payload = row.payload || {};
   const special = specialList(payload.blue);
@@ -92,6 +101,7 @@ function mapHit(hit) {
     typeLabel: typeLabel(hit.type),
     units: hit.units,
     valueText: format.centsToYuan(hit.cost),
+    winText: format.centsToYuan(winAmountOf(hit)),
     changeText: format.changeText(hit.profit),
     changeClass: format.changeClass(hit.profit),
     matchesText: matchesText(hit.tierCounts)
@@ -111,6 +121,7 @@ function mapLatest(data) {
     records: records,
     summary: {
       valueText: format.centsToYuan(summary.cost),
+      winText: format.centsToYuan(winAmountOf(summary)),
       changeText: format.changeText(summary.profit),
       changeClass: format.changeClass(summary.profit)
     }
@@ -131,6 +142,7 @@ function mapHistory(data) {
       records: records,
       summary: {
         valueText: format.centsToYuan(summary.cost),
+        winText: format.centsToYuan(winAmountOf(summary)),
         changeText: format.changeText(summary.profit),
         changeClass: format.changeClass(summary.profit)
       }
@@ -171,6 +183,7 @@ function mapStats(data) {
       periods: summary.periods || 0,
       hitPeriods: summary.winsCount || 0,
       valueText: format.centsToYuan(summary.cost),
+      winText: format.centsToYuan(winAmountOf(summary)),
       changeText: format.changeText(summary.profit),
       changeClass: format.changeClass(summary.profit),
       levels: levelItems(summary.tierCounts)
@@ -183,6 +196,7 @@ function mapStats(data) {
         periods: row.periods,
         hitPeriods: row.winsCount,
         valueText: format.centsToYuan(row.cost),
+        winText: format.centsToYuan(winAmountOf(row)),
         changeText: format.changeText(row.profit),
         changeClass: format.changeClass(row.profit),
         bestText: row.bestWin > 0 ? "¥" + format.centsToYuan(row.bestWin) : "—",

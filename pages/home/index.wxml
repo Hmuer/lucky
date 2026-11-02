@@ -39,6 +39,10 @@
           <view class="value">¥{{latest.summary.valueText}}</view>
         </view>
         <view>
+          <view class="muted">回补</view>
+          <view class="value">¥{{latest.summary.winText}}</view>
+        </view>
+        <view>
           <view class="muted">变化</view>
           <view class="value {{latest.summary.changeClass}}">{{latest.summary.changeText}}</view>
         </view>
@@ -64,7 +68,7 @@
         <view class="row between hit-line">
           <view class="muted">{{item.matchesText}}</view>
           <view class="row">
-            <view class="muted">记录 ¥{{item.valueText}}</view>
+            <view class="muted">记录 ¥{{item.valueText}} · 回补 ¥{{item.winText}}</view>
             <view class="value {{item.changeClass}} change">{{item.changeText}}</view>
           </view>
         </view>
