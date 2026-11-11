@@ -32,6 +32,8 @@ import { rowToBet } from "./adapter";
 export interface SyncReport {
   fetched: number;
   saved: number;
+  /** 已存在但数据不完整、本次补全的期数 */
+  repaired: number;
   hits: number;
   errors: string[];
   skipped: boolean;
@@ -55,14 +57,30 @@ function shouldSettle(b: { active: number; buy_enabled: number }): boolean {
   return true;
 }
 
+/**
+ * 官方公告在开奖后可能先返回“只有号码、没有销量/奖级”的占位数据。
+ * 这种期不能入库结算，否则一二等奖金额会写成 0，且期号不再变化后永远不会修正。
+ */
+function isCompleteDraw(d: DrawRow): boolean {
+  return (
+    (d.sales ?? 0) > 0 &&
+    (d.poolmoney ?? 0) > 0 &&
+    (d.prize6_count ?? 0) > 0
+  );
+}
+
+function positiveAmount(v: number | null | undefined): number | undefined {
+  return typeof v === "number" && v > 0 ? v : undefined;
+}
+
 function prizeAmountsFrom(drawRow: DrawRow): Partial<Record<PrizeTier, number>> {
   return {
-    1: drawRow.prize1_amount ?? undefined,
-    2: drawRow.prize2_amount ?? undefined,
-    3: drawRow.prize3_amount ?? undefined,
-    4: drawRow.prize4_amount ?? undefined,
-    5: drawRow.prize5_amount ?? undefined,
-    6: drawRow.prize6_amount ?? undefined,
+    1: positiveAmount(drawRow.prize1_amount),
+    2: positiveAmount(drawRow.prize2_amount),
+    3: positiveAmount(drawRow.prize3_amount),
+    4: positiveAmount(drawRow.prize4_amount),
+    5: positiveAmount(drawRow.prize5_amount),
+    6: positiveAmount(drawRow.prize6_amount),
   } as any;
 }
 
@@ -97,11 +115,11 @@ function buildHits(drawRows: DrawRow[], bets: BetRow[]): HitWrite[] {
 }
 
 /**
- * 增量同步：只在发现新期时写入。
- * 没有新期时不写 draws / hit_records / app_meta，直接返回 skipped。
+ * 增量同步：新期完整才入库；已入库但缺销量/奖级数据的期会自动补全并重算。
+ * 没有新期且没有可修复期时不写 draws / hit_records / app_meta。
  */
 export async function syncLatest(): Promise<SyncReport> {
-  const report: SyncReport = { fetched: 0, saved: 0, hits: 0, errors: [], skipped: false, newDraws: [] };
+  const report: SyncReport = { fetched: 0, saved: 0, repaired: 0, hits: 0, errors: [], skipped: false, newDraws: [] };
 
   let rows;
   try {
@@ -114,18 +132,26 @@ export async function syncLatest(): Promise<SyncReport> {
   if (!rows.length) return report;
 
   try {
-    const dbLatest = await latestDraw();
-    if (dbLatest && rows[0].code <= dbLatest.code) {
-      report.skipped = true;
-      return report;
+    const [dbLatest, dbRecent] = await Promise.all([latestDraw(), listDraws(30)]);
+    const dbByCode = new Map(dbRecent.map((d) => [d.code, d] as const));
+
+    // rows 已按最新在前排序；新期取全部，已存在期只检查最近 30 期是否缺数据。
+    const candidates = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) {
+      if (!dbLatest || r.code > dbLatest.code) candidates.set(r.code, r);
+    }
+    for (const r of rows.slice(0, 30)) {
+      if (dbByCode.has(r.code)) candidates.set(r.code, r);
     }
 
-    // rows 已按最新在前排序；只解析比库内最新期更新的期，按旧→新处理
-    const fresh = rows.filter((r) => !dbLatest || r.code > dbLatest.code).reverse();
     const parsed: DrawRow[] = [];
-    for (const r of fresh) {
+    for (const r of candidates.values()) {
       try {
-        parsed.push({ ...parseDrawRow(r), fetched_at: Date.now() } as DrawRow);
+        const row = { ...parseDrawRow(r), fetched_at: Date.now() } as DrawRow;
+        if (!isCompleteDraw(row)) continue;
+        const existing = dbByCode.get(row.code);
+        if (existing && isCompleteDraw(existing)) continue;
+        parsed.push(row);
       } catch (e: any) {
         report.errors.push(`parse ${r.code}: ${e?.message ?? e}`);
       }
@@ -135,6 +161,10 @@ export async function syncLatest(): Promise<SyncReport> {
       return report;
     }
 
+    parsed.sort((a, b) => a.code.localeCompare(b.code));
+    const newRows = parsed.filter((d) => !dbByCode.has(d.code));
+    const repairedRows = parsed.filter((d) => dbByCode.has(d.code));
+
     const bets = await listBets(true, null);
     const hits = buildHits(parsed, bets);
 
@@ -143,9 +173,10 @@ export async function syncLatest(): Promise<SyncReport> {
       await upsertHitRecords(hits, conn);
     });
 
-    report.saved = parsed.length;
+    report.saved = newRows.length;
+    report.repaired = repairedRows.length;
     report.hits = hits.length;
-    report.newDraws = parsed.map((d) => d.code);
+    report.newDraws = newRows.map((d) => d.code);
     await setMeta("last_sync_at", new Date().toISOString());
     return report;
   } catch (e: any) {
@@ -181,7 +212,7 @@ async function doEnsureLatestSeed(): Promise<void> {
   } else {
     const r = await syncLatest();
     console.log(
-      `[sync] 启动检查: 拉取 ${r.fetched} 期，新增 ${r.saved} 期，结算 ${r.hits} 条${r.skipped ? "（无新开奖）" : ""}`
+      `[sync] 启动检查: 拉取 ${r.fetched} 期，新增 ${r.saved} 期，修复 ${r.repaired} 期，结算 ${r.hits} 条${r.skipped ? "（无新开奖/无需修复）" : ""}`
     );
   }
 }
@@ -209,7 +240,10 @@ export async function backfillHistory(): Promise<{ fetched: number; saved: numbe
   for (const r of rows) {
     if (existing.has(r.code)) continue;
     try {
-      parsed.push({ ...parseDrawRow(r), fetched_at: Date.now() } as DrawRow);
+      const row = { ...parseDrawRow(r), fetched_at: Date.now() } as DrawRow;
+      // 开奖后接口可能先给占位数据；历史回填也不能把 0 值写死。
+      if (!isCompleteDraw(row)) continue;
+      parsed.push(row);
     } catch (e: any) {
       report.errors.push(`${r?.code}: ${e?.message ?? e}`);
     }
@@ -337,10 +371,10 @@ async function tick(reason: "draw" | "retry"): Promise<void> {
       console.error("[sync] 检查有错误:", r.errors.join("; "));
     }
     console.log(
-      `[sync] 检查完成: 拉取 ${r.fetched} 期，新增 ${r.saved} 期，结算 ${r.hits} 条，推送 ${r.pushed} 人${r.skipped ? "（无新开奖）" : ""}`
+      `[sync] 检查完成: 拉取 ${r.fetched} 期，新增 ${r.saved} 期，修复 ${r.repaired} 期，结算 ${r.hits} 条，推送 ${r.pushed} 人${r.skipped ? "（无新开奖/无需修复）" : ""}`
     );
 
-    if ((reason === "draw" || reason === "retry") && r.saved === 0 && _retryCount < MAX_RETRIES) {
+    if ((reason === "draw" || reason === "retry") && r.saved === 0 && r.repaired === 0 && _retryCount < MAX_RETRIES) {
       _retryCount++;
       scheduleAt(new Date(Date.now() + RETRY_DELAY_MS), "retry");
       return;

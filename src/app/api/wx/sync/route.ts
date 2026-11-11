@@ -21,7 +21,7 @@ export async function POST(req: Request) {
 
   try {
     const result = await syncAndNotify();
-    if (result.errors.length && result.saved === 0) {
+    if (result.errors.length && result.saved === 0 && result.repaired === 0) {
       return fail(50001, result.errors.join("; "));
     }
     return ok(result);
